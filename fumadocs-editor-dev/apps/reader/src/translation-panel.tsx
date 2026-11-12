@@ -1,7 +1,7 @@
-import { Languages, LoaderCircle } from "lucide-react";
+import { Languages, LoaderCircle, TriangleAlert } from "lucide-react";
 import { MarkdownArticle } from "./markdown";
 import type { ReadingMode, TranslationState } from "./translation";
-import { canShowTranslation, translationNotice } from "./translation";
+import { canShowTranslation, translationNotice, translationWarning } from "./translation";
 
 const MODES: Array<{ value: ReadingMode; label: string }> = [
   { value: "original", label: "Original" },
@@ -34,5 +34,9 @@ export function TranslationContent({
   const notice = translationNotice(state);
   if (notice) return <p className="translation-notice">{state.status === "loading" && <LoaderCircle className="spin" size={15} />}{notice}</p>;
   if (!canShowTranslation(state)) return null;
-  return <section className="translation-content" aria-label={`${language} translation`}><MarkdownArticle source={state.translation!.content!} /></section>;
+  const warning = translationWarning(state);
+  return <section className="translation-content" aria-label={`${language} translation`}>
+    {warning && <p className="translation-warning"><TriangleAlert size={15} />{warning}</p>}
+    <MarkdownArticle source={state.translation!.content!} />
+  </section>;
 }

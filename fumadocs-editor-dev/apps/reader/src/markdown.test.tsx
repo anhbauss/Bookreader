@@ -81,9 +81,10 @@ describe("MarkdownArticle math rendering", () => {
     expect(html).not.toContain("math-error");
   });
 
+
   it("typesets an undelimited fraction block", () => {
     const html = renderToStaticMarkup(
-      <MarkdownArticle source="\\frac {e ^ {- t}}{1 + \\Omega_ {0} ^ {2}} + \\frac {\\cos (\\Omega_ {0} t) + \\Omega_ {0} \\sin (\\Omega_ {0} t)}{1 + \\Omega_ {0} ^ {2}}" />,
+      <MarkdownArticle source="\\\\frac {e ^ {- t}}{1 + \\Omega_ {0} ^ {2}} + \\frac {\\cos (\\Omega_ {0} t) + \\Omega_ {0} \\sin (\\Omega_ {0} t)}{1 + \\Omega_ {0} ^ {2}}" />,
     );
 
     expect(html).toContain('class="math-display"');

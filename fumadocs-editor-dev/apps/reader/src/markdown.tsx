@@ -22,19 +22,45 @@ function Math({ expression, display = false }: { expression: string; display?: b
 
 function normalizeMathSource(text: string): string {
   return text
+    // Some staged Markdown preserves an escaped TeX command (for example `\\\\frac`).
+    // Collapse that extra escape only for known commands, never for general `\\\\` line breaks.
+    .replace(/\\\\(?=(?:frac|dfrac|tfrac|sqrt|sum|prod|int|iint|iiint|oint|lim|exp|ln|log|sin|cos|tan|cot|sec|csc|left|right|begin|end|text|mathrm|mathbf|mathbb|Omega|theta|pi|alpha|beta|gamma|delta|ldots|dots|cdot|times|pm|leq|geq|neq|to|rightarrow|leftarrow)\b)/g, "\\")
     .replace(/\\\{([^{}\n]*)\\\}/g, "{$1}")
-    .replace(/\\tag\s*(?:\{[^{}\n]*\}|\([^()\n]*\))/g, "")
+    .replace(/\\left\s*\{/g, "\\left\\{")
+    .replace(/\\right\s*\}/g, "\\right\\}")
+    .replace(/\\tag\s*(?:\\\{[^{}\n]*\\\}|\{[^{}\n]*\}|\([^()\n]*\))/g, "")
     .replace(/\\\s+/g, " ");
+}
+
+/**
+ * Translation artifacts are Markdown too, but older translators can leave a complete
+ * TeX array inside a prose block rather than isolating it with `$$` delimiters. Promote
+ * only closed LaTeX environments so the normal Markdown renderer sends them to KaTeX.
+ * Fenced code is intentionally left unchanged.
+ */
+function promoteEmbeddedMathEnvironments(source: string): string {
+  const pieces = source.split(/(```[\s\S]*?```)/g);
+  return pieces
+    .map((piece, index) => {
+      if (index % 2 === 1) return piece;
+      return piece.replace(
+        /\\begin\s*\{(array|aligned|alignedat|cases|matrix|pmatrix|bmatrix|vmatrix|Vmatrix)\}[\s\S]*?\\end\s*\{\1\}/g,
+        (environment) => `\n\n$$\n${environment.trim()}\n$$\n\n`,
+      );
+    })
+    .join("");
+}
+
+export function prepareMarkdownForRendering(source: string): string {
+  return promoteEmbeddedMathEnvironments(source);
 }
 
 function isRawMath(text: string): boolean {
   const value = normalizeMathSource(text).trim();
-  return (
-    !value.includes("$") &&
-    /(?:\\[A-Za-z]+|[_^]\s*\{|[=≤≥∑∫∞→⇔])/u.test(value) &&
-    /(?:=|\\(?:stackrel|x?leftrightarrow|longleftrightarrow|frac|sum|int|begin|left|right)\b|[_^]\s*\{)/.test(value) &&
-    !/[.!?]\s+\p{L}{3,}/u.test(value)
-  );
+  const hasMathSyntax = /(?:\\[A-Za-z]+|[_^]\s*\{|[=≤≥∑∫∞→⇔])/u.test(value);
+  const hasEquationMarker = /(?:=|\\(?:stackrel|x?leftrightarrow|longleftrightarrow|frac|sum|int|begin|left|right|exp|ln|log|sin|cos|min|max)\b|[_^]\s*\{)/.test(value);
+  const hasProseSentence = /[.!?]\s+\p{L}{3,}/u.test(value);
+  return !value.includes("$") && hasMathSyntax && hasEquationMarker && !hasProseSentence;
 }
 
 function mathOrInline(text: string, key: string) {
@@ -86,7 +112,7 @@ function inline(text: string, key: string) {
 
 /** A deliberately small, non-executing Markdown renderer for reader content. */
 export function MarkdownArticle({ source }: { source: string }) {
-  const blocks = source.trim().split(/\n{2,}/);
+  const blocks = prepareMarkdownForRendering(source).trim().split(/\n{2,}/);
   return (
     <div className="markdown">
       {blocks.map((block, index) => {

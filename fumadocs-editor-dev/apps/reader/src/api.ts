@@ -42,6 +42,8 @@ export interface SectionTranslation {
   includes_assets: boolean | null;
   section_has_assets: boolean;
   alignment_status: "aligned" | "unaligned" | "invalid" | null;
+  missing_assets: Array<{ link: string }>;
+  structure_issues: Array<{ kind: string; target: string; change: "missing" | "added"; count: number }>;
 }
 
 interface ApiErrorPayload {

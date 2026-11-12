@@ -13,7 +13,13 @@ export function resolveReadingMode(value: string | null): ReadingMode {
 }
 
 export function canShowTranslation(state: TranslationState): boolean {
-  return state.status === "ready" && state.translation?.status === "fresh" && Boolean(state.translation.content);
+  const translation = state.translation;
+  return (
+    state.status === "ready" &&
+    translation?.status === "fresh" &&
+    Boolean(translation.content) &&
+    (!translation.section_has_assets || translation.includes_assets === true)
+  );
 }
 
 export function translationNotice(state: TranslationState): string | null {
@@ -24,5 +30,17 @@ export function translationNotice(state: TranslationState): string | null {
   if (state.translation.status === "untracked") return "This translation cannot be verified against the current source section and is not displayed.";
   if (state.translation.status === "orphaned") return "This translation no longer belongs to a readable section.";
   if (!state.translation.content) return "Translation content is empty.";
+  if (state.translation.section_has_assets && state.translation.includes_assets !== true) {
+    return "This translation omits figures or tables from the source section and is not displayed.";
+  }
+  return null;
+}
+
+export function translationWarning(state: TranslationState): string | null {
+  if (!canShowTranslation(state)) return null;
+  const translation = state.translation!;
+  if (translation.structure_issues.length > 0) {
+    return "Some links or anchors differ from the original section. Verify references while reading.";
+  }
   return null;
 }
