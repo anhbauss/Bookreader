@@ -1,0 +1,729 @@
+from __future__ import annotations
+
+import base64
+import binascii
+import contextlib
+import hashlib
+import re
+import shutil
+import warnings
+import zipfile
+from collections.abc import Callable
+from dataclasses import dataclass
+from html import unescape
+from html.parser import HTMLParser
+from pathlib import Path, PurePosixPath
+from typing import Protocol
+from urllib.parse import unquote, unquote_to_bytes
+from xml.etree import ElementTree
+
+from bookgraph.models import Document
+from bookgraph.parsers.markdown import document_from_markdown
+from bookgraph.parsers.mineru_source_map import _epub_spine
+from bookgraph.ports import DocumentParser
+from bookgraph.utils import doc_id_from_path, is_url
+
+# Image extensions worth unpacking from an EPUB. Kept broad so an unusual figure format
+# (e.g. an SVG diagram) is staged rather than silently dropped as a broken link.
+_IMAGE_SUFFIXES = frozenset(
+    {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".tif", ".tiff"}
+)
+
+# The parsed-document subdirectory staged images live in (MinerU uses the same one, and
+# ``bookgraph.assets.resolve_asset_path`` looks there). Single source of truth for both the
+# on-disk directory and the ``<subdir>/<name>`` reference written into the Markdown.
+_ASSETS_SUBDIR = "images"
+
+# A Markdown image reference: ``![alt](src)`` with an optional ``"title"`` or ``'title'``.
+# - alt tolerates escaped brackets and one level of nesting (``![Fig [2-6]](...)``), so a
+#   bracketed figure number does not make the whole reference silently fail to match.
+# - src is either an angle-bracketed destination (``<my image.png>``, which may contain spaces)
+#   or a bare destination that allows one level of balanced parens (``assets/plot(1).png``) — an
+#   unencoded ``(`` is a valid URL char tools do not percent-encode, and truncating it would
+#   report an existing asset as unresolved.
+# - both title quote styles are accepted so a single-quoted title never leaves a ref unstaged.
+_IMAGE_REFERENCE = re.compile(
+    r"!\[(?P<alt>(?:\\.|\[[^\]]*\]|[^\[\]\\])*)\]"
+    r"\(\s*(?:<(?P<src_angle>[^>\n]*)>|(?P<src_bare>(?:[^()\s]|\([^()\s]*\))+))"
+    r"(?P<title>\s+(?:\"[^\"]*\"|'[^']*'))?\s*\)"
+)
+
+# Characters that break a bare CommonMark link destination (whitespace splits it into text;
+# quotes/brackets/parens are delimiters). Collapsed to ``_`` in staged filenames so the
+# rewritten ``![alt](images/<name>)`` always tokenises back into an image whose ``src`` matches
+# the file on disk byte-for-byte (angle-bracketed destinations would percent-encode the space
+# and no longer resolve).
+_UNSAFE_ASSET_CHARS = re.compile(r"[\s()<>\"'\\]+")
+
+# A fenced code block opener/closer (``` or ~~~, 3+, after optional indent) and an inline code
+# span. Image references inside code are content — e.g. a chapter teaching Markdown that prints
+# ``![figure](assets/x.png)`` in a sample — and must not be rewritten into staged paths.
+_CODE_FENCE = re.compile(r"^\s*(?P<fence>`{3,}|~{3,})")
+_INLINE_CODE = re.compile(r"(?P<ticks>`+).*?(?P=ticks)")
+_BACKTICK_RUN = re.compile(r"`+")
+
+# The media type of an embedded image MarkItDown writes for DOCX/PPTX pictures (``keep_data_uris``)
+# or that an HTML source carries inline: ``data:image/<subtype>[;param...][;base64],<payload>``.
+_DATA_URI_MEDIA_TYPE = re.compile(r"image/(?P<subtype>[a-z0-9.+-]+)", re.IGNORECASE)
+_DATA_URI_SUFFIXES = {"jpeg": ".jpg", "svg+xml": ".svg", "x-emf": ".emf", "x-wmf": ".wmf"}
+
+
+class MissingParserDependencyError(RuntimeError):
+    """Raised when an optional parser dependency is not installed."""
+
+
+class MarkdownConversion(Protocol):
+    text_content: str
+
+
+class MarkdownConverter(Protocol):
+    def convert(self, source: str) -> MarkdownConversion: ...
+
+
+@dataclass
+class MarkItDownParser(DocumentParser):
+    """Adapter for Office/HTML/text sources via MarkItDown.
+
+    MarkItDown stays an optional extra: it is imported lazily and the failure is
+    reported only when this parser runs, so the base install stays lightweight.
+    ``converter`` can be injected, which keeps the adapter testable without the
+    dependency.
+    """
+
+    converter: MarkdownConverter | None = None
+    name: str = "markitdown"
+
+    def parse(self, source: Path, output_dir: Path) -> Document:
+        converter = self.converter or _load_markitdown()
+        conversion = converter.convert(str(source))
+        markdown = conversion.text_content
+        doc_id = doc_id_from_path(source)
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        # MarkItDown never writes image files: EPUB ``<img>`` srcs stay zip-relative paths and
+        # DOCX/PPTX pictures become data URIs, so the staged Markdown would otherwise reference
+        # files that do not exist.
+        markdown, unresolved = _stage_assets(source, output_dir, markdown)
+        staged = output_dir / f"{doc_id}.md"
+        staged.write_text(markdown)
+
+        metadata: dict[str, str | int | float | bool | None] = {"markdown_path": str(staged)}
+        if unresolved:
+            # Return the count so the CLI can surface it: a stderr warning alone is swallowed
+            # under ``-W ignore`` or a filtered harness, letting ``parse`` report false success.
+            metadata["unresolved_image_count"] = len(unresolved)
+        flattened = getattr(conversion, "flattened_nested_tables", 0)
+        if flattened:
+            # A Markdown table cell cannot hold a table, so the inner one became cell text.
+            metadata["flattened_table_count"] = flattened
+            warnings.warn(
+                f"{source.name}: {flattened} nested table(s) were flattened into their outer "
+                "table cell as text; their row/column structure is not kept",
+                stacklevel=2,
+            )
+        document = document_from_markdown(
+            markdown,
+            doc_id=doc_id,
+            fallback_title=source.stem,
+            source_path=str(source),
+            parser_name=self.name,
+            metadata=metadata,
+            # Block line ranges belong to the staged Markdown, so that artifact -
+            # not the binary original - is what proves each block.
+            block_source_path=str(staged),
+        )
+        _attach_source_html_fragments(source, document)
+        return document
+
+
+def _attach_source_html_fragments(source: Path, document: Document) -> None:
+    """Attach original HTML/XHTML body fragments to matching Markdown-derived blocks."""
+
+    fragments = _source_html_fragments(source)
+    if not fragments:
+        return
+    position = 0
+    for block in document.blocks:
+        if block.type == "image":
+            continue
+        needle = _visible_key(block.source_html or block.text)
+        if not needle:
+            continue
+        for index in range(position, len(fragments)):
+            fragment = fragments[index]
+            haystack = _visible_key(fragment)
+            if needle in haystack or haystack in needle:
+                if _contains_img(fragment):
+                    position = index + 1
+                    break
+                block.source_html = fragment
+                position = index + 1
+                break
+
+
+def _source_html_fragments(source: Path) -> list[str]:
+    suffix = source.suffix.lower()
+    if suffix == ".epub":
+        fragments: list[str] = []
+        try:
+            archive = zipfile.ZipFile(source)
+        except (OSError, zipfile.BadZipFile):
+            return []
+        with archive:
+            for member in _epub_html_members(archive):
+                try:
+                    html = archive.read(member).decode("utf-8", errors="replace")
+                except (KeyError, OSError):
+                    continue
+                fragments.extend(_body_fragments(html))
+        return fragments
+    if suffix in {".html", ".xhtml", ".htm"}:
+        return _body_fragments(source.read_text(encoding="utf-8", errors="replace"))
+    return []
+
+
+def _epub_html_members(archive: zipfile.ZipFile) -> list[str]:
+    try:
+        spine = [member for member in _epub_spine(archive) if member]
+    except (KeyError, OSError, zipfile.BadZipFile, ElementTree.ParseError):
+        spine = []
+    if spine:
+        return spine
+    return [
+        member
+        for member in archive.namelist()
+        if PurePosixPath(member).suffix.lower() in {".html", ".xhtml", ".htm"}
+    ]
+
+
+def _body_fragments(html: str) -> list[str]:
+    parser = _BodyFragmentParser()
+    parser.feed(html)
+    parser.close()
+    return parser.fragments
+
+def _contains_img(html: str) -> bool:
+    return re.search(r"<\s*img\b", html, flags=re.IGNORECASE) is not None
+
+
+def _visible_key(html: str) -> str:
+    parser = _VisibleTextParser()
+    parser.feed(html)
+    parser.close()
+    return re.sub(r"\s+", " ", unescape(" ".join(parser.parts))).strip().lower()
+
+
+class _BodyFragmentParser(HTMLParser):
+    _READING_TAGS = frozenset(
+        {
+            "blockquote",
+            "figure",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "ol",
+            "p",
+            "pre",
+            "table",
+            "ul",
+        }
+    )
+    _SKIP_TAGS = frozenset({"head", "script", "style", "nav"})
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.fragments: list[str] = []
+        self._in_body = False
+        self._capture_tag: str | None = None
+        self._depth = 0
+        self._skip_depth = 0
+        self._current: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag == "body":
+            self._in_body = True
+            return
+        if not self._in_body:
+            return
+        if tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if self._capture_tag is None and tag in self._READING_TAGS:
+            self._capture_tag = tag
+        if self._capture_tag is not None:
+            self._push(self.get_starttag_text() or f"<{tag}>")
+            self._depth += 1
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self._in_body and not self._skip_depth and self._capture_tag is not None:
+            self._push(self.get_starttag_text() or f"<{tag}/>")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag == "body":
+            self._flush()
+            self._in_body = False
+            return
+        if tag in self._SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if not self._in_body or self._skip_depth or self._capture_tag is None:
+            return
+        self._push(f"</{tag}>")
+        self._depth = max(0, self._depth - 1)
+        if self._depth == 0:
+            self._flush()
+            self._capture_tag = None
+
+    def handle_data(self, data: str) -> None:
+        if self._capture_tag is not None and not self._skip_depth:
+            self._push(data)
+
+    def handle_entityref(self, name: str) -> None:
+        if self._capture_tag is not None and not self._skip_depth:
+            self._push(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if self._capture_tag is not None and not self._skip_depth:
+            self._push(f"&#{name};")
+
+    def _push(self, text: str) -> None:
+        self._current.append(text)
+
+    def _flush(self) -> None:
+        fragment = "".join(self._current).strip()
+        if fragment:
+            self.fragments.append(fragment)
+        self._current = []
+
+
+class _VisibleTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def _stage_assets(source: Path, output_dir: Path, markdown: str) -> tuple[str, list[str]]:
+    """Write every image the Markdown embeds or references beside it and repoint each reference.
+
+    Data-URI images (DOCX/PPTX pictures, inline HTML images) are decoded for any source and
+    named by content hash, so an image repeated in the document is stored once and a re-parse
+    keeps the same name. EPUB references are matched to zip members as below.
+
+    MarkItDown converts every spine XHTML into Markdown but leaves each ``<img>`` src as the
+    zip-relative path it found (e.g. ``assets/ddia_0206.png``) and never extracts the bytes,
+    so the reference resolves to nothing under ``sources/parsed/<doc_id>/``. Unpack each
+    referenced image into ``output_dir/images/`` — the staged-asset directory MinerU also uses
+    (``bookgraph.assets.resolve_asset_path`` looks there) — and rewrite the reference to a
+    stable ``images/<name>`` path the downstream asset resolver can open. References that cannot
+    be matched to exactly one file in the EPUB are left untouched, collected, and reported via a
+    warning, so a lossy or ambiguous conversion is surfaced rather than shipped as a silently
+    broken (or silently wrong) image. References inside code fences and inline code are left
+    alone so a sample like ``![figure](assets/x.png)`` in prose about Markdown is not corrupted.
+
+    Returns the rewritten Markdown and the sorted-unique list of references that could not be
+    staged, so the caller can surface the count (a stderr warning alone is easily swallowed).
+
+    For a non-EPUB source, or an EPUB that fails to open, only data URIs are staged; any other
+    relative reference is left as written.
+    """
+
+    archive: zipfile.ZipFile | None = None
+    if source.suffix.lower() == ".epub":
+        try:
+            archive = zipfile.ZipFile(source)
+        except (OSError, zipfile.BadZipFile):
+            archive = None
+    if archive is None and "data:" not in markdown:
+        return markdown, []
+
+    assets_dir = output_dir / _ASSETS_SUBDIR
+    # Stage into a sibling temp dir and swap it in only once the whole set is extracted, so a
+    # corrupt member or mid-run disk error never deletes the previous good images or leaves the
+    # live ``images/`` half-populated (the repo supports incremental re-ingestion).
+    staging_dir = output_dir / ".images.staging"
+    shutil.rmtree(staging_dir, ignore_errors=True)
+    staged_by_member: dict[str, str] = {}
+    used_names: set[str] = set()
+    missing: list[str] = []
+    extraction_failed = False
+
+    try:
+        with archive if archive is not None else contextlib.nullcontext():
+            image_members = (
+                [
+                    name
+                    for name in archive.namelist()
+                    if not name.endswith("/")
+                    and PurePosixPath(name).suffix.lower() in _IMAGE_SUFFIXES
+                ]
+                if archive is not None
+                else []
+            )
+
+            def stage(source_ref: str) -> str | None:
+                nonlocal extraction_failed
+                if source_ref[:5].lower() == "data:":
+                    try:
+                        return _stage_data_uri(
+                            source_ref, staging_dir, staged_by_member, used_names
+                        )
+                    except OSError:
+                        extraction_failed = True
+                        return None
+                if archive is None:
+                    return None
+                member = match_epub_member(source_ref, image_members)
+                if member is None:
+                    return None
+                staged = staged_by_member.get(member)
+                if staged is None:
+                    try:
+                        staged = _extract_member(archive, member, staging_dir, used_names)
+                    except (OSError, zipfile.BadZipFile):
+                        # A corrupt/unreadable member is treated as unresolved (warned), never a
+                        # crash that would abort the whole parse with a raw traceback. Flag it so
+                        # the swap below knows this staged set is incomplete.
+                        extraction_failed = True
+                        return None
+                    staged_by_member[member] = staged
+                return staged
+
+            def rewrite(match: re.Match[str]) -> str:
+                angle = match.group("src_angle")
+                src = angle if angle is not None else match.group("src_bare")
+                data_uri = src[:5].lower() == "data:"
+                if is_url(src) and not data_uri:
+                    return match.group(0)
+                staged = stage(src)
+                if staged is None:
+                    # Normalise before recording so ``x.png`` and ``x.png#note`` count once.
+                    missing.append(_data_uri_label(src) if data_uri else clean_asset_reference(src))
+                    return match.group(0)
+                # Preserve any ``"title"`` the source carried; the destination is repointed to the
+                # link-safe staged path, so it is always emitted bare (never angle-bracketed).
+                return f"![{match.group('alt')}]({staged}{match.group('title') or ''})"
+
+            rewritten = _rewrite_image_references(markdown, rewrite)
+
+        _publish_staged_assets(staging_dir, assets_dir, staged_by_member, extraction_failed)
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+
+    unique_missing = sorted(set(missing))
+    if unique_missing:
+        preview = ", ".join(unique_missing[:5])
+        if len(unique_missing) > 5:
+            preview += ", ..."
+        warnings.warn(
+            f"{source.name}: {len(unique_missing)} image reference(s) had no matching asset "
+            f"and remain broken links: {preview}",
+            stacklevel=2,
+        )
+    return rewritten, unique_missing
+
+
+def _publish_staged_assets(
+    staging_dir: Path,
+    assets_dir: Path,
+    staged_by_member: dict[str, str],
+    extraction_failed: bool,
+) -> None:
+    """Move the freshly staged images into the live ``images/`` directory.
+
+    - Nothing staged: leave ``images/`` as-is. A reference-less or wholly-failed run must not
+      wipe the previous good assets down to an empty directory.
+    - A complete set (every referenced member extracted): replace ``images/`` atomically, so
+      assets renamed or removed since the last parse do not linger as orphans.
+    - An incomplete set (a member failed mid-run and was swallowed as unresolved): merge the
+      files that did stage in *without* deleting anything, so a transient failure never loses a
+      previously-good asset. Any resulting staleness is reclaimed on the next clean re-parse.
+    """
+
+    if not staged_by_member:
+        return
+    if not extraction_failed:
+        shutil.rmtree(assets_dir, ignore_errors=True)
+        try:
+            staging_dir.rename(assets_dir)
+            return
+        except OSError:
+            # rmtree above swallows errors, so a target left non-empty (permission-denied or an
+            # in-use file) makes the rename raise "Directory not empty". Fall back to the
+            # per-file merge rather than crash the parse with a raw traceback.
+            pass
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    for staged_rel in staged_by_member.values():
+        name = PurePosixPath(staged_rel).name
+        (staging_dir / name).replace(assets_dir / name)
+
+
+def _rewrite_image_references(markdown: str, rewrite: Callable[[re.Match[str]], str]) -> str:
+    """Apply ``rewrite`` to every Markdown image reference outside code fences and inline code.
+
+    Rewriting the raw string is simplest, but a naive ``sub`` over the whole document would also
+    touch image syntax printed *as an example* inside code — corrupting the sample. Skip fenced
+    blocks line-by-line and inline-code spans within a line so only real references are staged.
+
+    Two rare shapes are not recognised — a fuller fix would reuse the token stream
+    ``document_from_markdown`` builds, but the coupling is not worth it while markdownify emits
+    neither: an inline-code span that straddles a line break (matched per line here), and a
+    4-space-indented code block (only ``` ```/~~~ fences are skipped).
+    """
+
+    out: list[str] = []
+    fence: str | None = None  # the active fence's marker char, or None outside any fence
+    fence_len = 0
+    for line in markdown.splitlines(keepends=True):
+        opener = _CODE_FENCE.match(line)
+        if fence is not None:
+            out.append(line)
+            marker = opener.group("fence") if opener else ""
+            if marker and marker[0] == fence and len(marker) >= fence_len:
+                fence = None
+            continue
+        if opener:
+            fence = opener.group("fence")[0]
+            fence_len = len(opener.group("fence"))
+            out.append(line)
+            continue
+        out.append(_rewrite_line(line, rewrite))
+    return "".join(out)
+
+
+def _rewrite_line(line: str, rewrite: Callable[[re.Match[str]], str]) -> str:
+    """Rewrite image references in one line, leaving inline-code spans untouched.
+
+    Whichever starts first wins: an inline-code span is copied verbatim (so an image printed as
+    an example stays as written), and an image reference is rewritten whole even when its alt
+    text carries backticks (``![the `tbl` table](x.png)``), which would otherwise be taken as
+    inline code and split the reference. The one exception is a code span that opens inside the
+    alt and closes after it: CommonMark reads that as code, not an image.
+
+    Each regex match is kept until the scan passes it, so a line holding many images (a DOCX
+    paragraph of inline pictures, each a long data URI) is walked once, not once per image.
+    """
+
+    pieces: list[str] = []
+    pos = 0
+    image = _IMAGE_REFERENCE.search(line)
+    code = _INLINE_CODE.search(line)
+    while image is not None:
+        if code is not None and code.start() < pos:
+            code = _INLINE_CODE.search(line, pos)
+        if code is not None and code.start() < image.start():
+            end = code.end()
+        else:
+            straddling = _code_span_leaving_alt(line, image)
+            if straddling is None:
+                pieces.append(line[pos : image.start()])
+                pieces.append(rewrite(image))
+                pos = image.end()
+                image = _IMAGE_REFERENCE.search(line, pos)
+                continue
+            end = straddling.end()
+        pieces.append(line[pos:end])
+        pos = end
+        if image.start() < pos:
+            image = _IMAGE_REFERENCE.search(line, pos)
+    pieces.append(line[pos:])
+    return "".join(pieces)
+
+
+def _code_span_leaving_alt(line: str, image: re.Match[str]) -> re.Match[str] | None:
+    """The inline-code span that opens inside ``image``'s alt text and closes after it, if any.
+
+    A backtick run with no closing run is literal text, and a span that closes inside the alt
+    is part of the alt, so neither breaks the image.
+    """
+
+    alt_start, alt_end = image.span("alt")
+    pos = alt_start
+    while (tick := _BACKTICK_RUN.search(line, pos, alt_end)) is not None:
+        span = _INLINE_CODE.match(line, tick.start())
+        if span is None:
+            pos = tick.end()
+        elif span.end() > alt_end:
+            return span
+        else:
+            pos = span.end()
+    return None
+
+
+def _data_uri_label(src: str) -> str:
+    """Name an unstageable data URI by media type and payload hash, never the payload itself."""
+
+    header, _, payload = src.partition(",")
+    return f"{header},<sha256:{hashlib.sha256(payload.encode()).hexdigest()[:8]}>"
+
+
+def _decode_data_uri(src: str) -> tuple[str, bytes] | None:
+    """Return ``(image subtype, bytes)`` for an image data URI, base64 or percent-encoded."""
+
+    header, comma, payload = src.partition(",")
+    if not comma or header[:5].lower() != "data:":
+        return None
+    params = header[5:].split(";")
+    media = _DATA_URI_MEDIA_TYPE.fullmatch(params[0])
+    if media is None:
+        return None
+    if params[-1].lower() == "base64":
+        try:
+            data = base64.b64decode(payload, validate=True)
+        except (binascii.Error, ValueError):
+            return None
+    else:
+        data = unquote_to_bytes(payload)
+    return (media.group("subtype").lower(), data) if data else None
+
+
+def _stage_data_uri(
+    src: str, dest_dir: Path, staged_by_ref: dict[str, str], used_names: set[str]
+) -> str | None:
+    """Decode an image data URI into ``dest_dir``; ``None`` if it is not a decodable one.
+
+    The file is named ``image-<sha256 prefix><suffix>`` so identical pictures share one file.
+    """
+
+    decoded = _decode_data_uri(src)
+    if decoded is None:
+        return None
+    subtype, data = decoded
+    digest = hashlib.sha256(data).hexdigest()
+    key = f"data:{digest}"
+    staged = staged_by_ref.get(key)
+    if staged is not None:
+        return staged
+    suffix = _DATA_URI_SUFFIXES.get(subtype, "." + subtype.removeprefix("x-").split("+")[0])
+    name = _unique_name(safe_asset_name(f"image-{digest[:16]}{suffix}"), used_names)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    (dest_dir / name).write_bytes(data)
+    staged = f"{_ASSETS_SUBDIR}/{name}"
+    staged_by_ref[key] = staged
+    return staged
+
+
+def match_epub_member(source_ref: str, image_members: list[str]) -> str | None:
+    """Find the single EPUB member an image reference points at, or ``None`` if ambiguous.
+
+    The reference is XHTML-relative and its originating file is lost once MarkItDown flattens
+    the spine, so match on the path tail first (``.../assets/ddia_0206.png``), then fall back to
+    a basename match. ``..`` segments are dropped rather than resolved because there is no
+    anchor directory left to resolve them against.
+
+    A match is only returned when it is *unambiguous* — exactly one member matches. When two
+    chapters share an identical relative image path pointing at different files, guessing the
+    first would silently show the wrong figure; returning ``None`` surfaces it as an unresolved
+    reference (a visible warning) instead, which is easier to notice and debug than a wrong
+    image.
+    """
+
+    tail = clean_asset_reference(source_ref).lstrip("/")
+    if not tail:
+        return None
+    normalized = PurePosixPath(tail)
+    parts = [part for part in normalized.parts if part not in ("..", ".")]
+    if not parts:
+        return None
+    suffix = "/".join(parts)
+    # Treat an exact whole-path member and a deeper ``.../<suffix>`` member as competing
+    # candidates: the reference is XHTML-relative, so ``images/fig.jpg`` could mean the root
+    # member or a chapter-relative one. Only resolve when exactly one candidate exists; a
+    # collision is surfaced as unresolved rather than guessed.
+    tail_matches = [
+        member for member in image_members if member == suffix or member.endswith("/" + suffix)
+    ]
+    if tail_matches:
+        return tail_matches[0] if len(tail_matches) == 1 else None
+    basename = normalized.name.lower()
+    base_matches = [
+        member for member in image_members if PurePosixPath(member).name.lower() == basename
+    ]
+    return base_matches[0] if len(base_matches) == 1 else None
+
+
+def _extract_member(
+    archive: zipfile.ZipFile, member: str, dest_dir: Path, used_names: set[str]
+) -> str:
+    """Extract one zip member into ``dest_dir`` under a collision-free, link-safe name.
+
+    Returns the ``images/<name>`` reference the Markdown should carry — the logical published
+    location, which ``dest_dir`` (a staging directory) is renamed or merged into afterwards.
+    """
+
+    name = _unique_name(safe_asset_name(PurePosixPath(member).name), used_names)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    # Stream rather than read the whole member into memory: a scanned technical book can carry
+    # tens-of-MB raster figures, and copyfileobj keeps the peak flat on image-heavy EPUBs.
+    with archive.open(member) as source_file, (dest_dir / name).open("wb") as dest:
+        shutil.copyfileobj(source_file, dest)
+    return f"{_ASSETS_SUBDIR}/{name}"
+
+
+def safe_asset_name(name: str) -> str:
+    """Collapse characters that break a bare Markdown link destination into ``_``.
+
+    A staged filename becomes part of the rewritten ``![alt](images/<name>)`` destination, so a
+    space or quote in it would either split the link into plain text or force an angle-bracketed
+    (percent-encoded) destination that no longer matches the file on disk. Keeping the name
+    link-safe lets the reference tokenise straight back into an image whose ``src`` opens the
+    real file.
+    """
+
+    stem = _UNSAFE_ASSET_CHARS.sub("_", PurePosixPath(name).stem).strip("_")
+    suffix = _UNSAFE_ASSET_CHARS.sub("_", PurePosixPath(name).suffix)
+    return f"{stem or 'image'}{suffix}"
+
+
+def _unique_name(name: str, used_names: set[str]) -> str:
+    """Reserve ``name`` under ``images/``, suffixing ``-N`` only on a real basename clash.
+
+    Uniqueness is checked on a casefolded key while the original case is kept for the on-disk
+    name: the staging filesystem is often case-insensitive (macOS APFS, Windows NTFS), so
+    ``Fig.png`` and ``fig.png`` would otherwise both pass and the second would overwrite the
+    first, leaving two references pointing at one physical file (a silently wrong figure).
+    """
+
+    candidate = name or "image"
+    if candidate.lower() not in used_names:
+        used_names.add(candidate.lower())
+        return candidate
+    stem, suffix = PurePosixPath(candidate).stem, PurePosixPath(candidate).suffix
+    counter = 1
+    while (candidate := f"{stem}-{counter}{suffix}").lower() in used_names:
+        counter += 1
+    used_names.add(candidate.lower())
+    return candidate
+
+
+def clean_asset_reference(source_ref: str) -> str:
+    """Drop URL fragment/query and percent-decode so the path can match a zip member.
+
+    Still needed with MarkItDown 0.1.8: it now decodes manifest hrefs to find chapters, but
+    keeps each ``<img>`` src percent-encoded in the Markdown (``Figure%201.png``), while zip
+    member names are stored decoded (``Figure 1.png``).
+    """
+
+    path = source_ref.split("#", 1)[0].split("?", 1)[0]
+    return unquote(path).strip()
+
+
+def _load_markitdown() -> MarkdownConverter:
+    try:
+        from bookgraph.parsers.markitdown_docx import BookgraphMarkItDown
+    except ImportError as exc:  # pragma: no cover - depends on install extras
+        raise MissingParserDependencyError(
+            "MarkItDown parser requires the optional parser dependencies. "
+            "Install with: uv sync --extra parsers"
+        ) from exc
+    converter: MarkdownConverter = BookgraphMarkItDown()
+    return converter

@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Annotated
+
+import typer
+
+from bookgraph.books import read_book_bookmarks
+from bookgraph.cli._app import app
+from bookgraph.cli._config import load_config
+from bookgraph.cli._shared import _validate_id, _validate_plugin_name
+from bookgraph.defaults import default_segmenter_registry
+from bookgraph.documents import read_document
+from bookgraph.quality import (
+    QualityReport,
+    document_quality_report,
+    write_quality_report,
+)
+from bookgraph.sections import write_sections
+from bookgraph.segmenters.bookmark import BookmarkSegmenter
+from bookgraph.segmenters.heading import HeadingSegmenter
+from bookgraph.segmenters.token_page import TokenPageSegmenter
+from bookgraph.workspace import WorkspacePaths
+
+
+@app.command()
+def segment(
+    workspace_path: Annotated[Path, typer.Argument(help="BookGraph workspace/output root path.")],
+    doc_id: Annotated[str, typer.Argument(help="Parsed document id from sources/parsed/<doc_id>.")],
+    segmenter: Annotated[
+        str | None,
+        typer.Option(
+            "--segmenter",
+            "-s",
+            help="Segmenter plugin name. Defaults to [segmenter].default.",
+        ),
+    ] = None,
+    target_level: Annotated[
+        int | None,
+        typer.Option(
+            "--target-level",
+            help=(
+                "Heading levels at or above this number start new sections. "
+                "Defaults to [segmenter].target_level."
+            ),
+        ),
+    ] = None,
+    max_tokens: Annotated[
+        int | None,
+        typer.Option(
+            "--max-tokens",
+            help=(
+                "Maximum tokens per token-page section. Defaults to "
+                "[segmenter].max_tokens."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Segment a parsed document into human reading sections under sources/sections/."""
+
+    workspace = WorkspacePaths(workspace_path.expanduser().resolve())
+    config = load_config(workspace)
+    resolved_doc_id = _validate_id(doc_id, "doc_id")
+    registry = default_segmenter_registry()
+    segmenter_name = _validate_plugin_name(registry, segmenter or config.segmenter.default)
+    resolved_target_level = config.segmenter.target_level if target_level is None else target_level
+    if resolved_target_level < 1:
+        raise typer.BadParameter("target_level must be at least 1")
+    resolved_max_tokens = config.segmenter.max_tokens if max_tokens is None else max_tokens
+    if resolved_max_tokens < 1:
+        raise typer.BadParameter("max_tokens must be at least 1")
+
+    document_path = workspace.sources_parsed / resolved_doc_id / "document.json"
+    if not document_path.is_file():
+        raise typer.BadParameter(
+            f"Parsed document not found: {document_path}. Run 'bookgraph parse' first."
+        )
+
+    try:
+        document = read_document(document_path)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid parsed document: {document_path}: {exc}") from exc
+    segmenter_plugin = registry.get(segmenter_name)
+    if isinstance(segmenter_plugin, HeadingSegmenter):
+        segmenter_plugin = HeadingSegmenter(target_level=resolved_target_level)
+    if isinstance(segmenter_plugin, BookmarkSegmenter):
+        segmenter_plugin = BookmarkSegmenter(
+            bookmarks=read_book_bookmarks(workspace, resolved_doc_id),
+            split_level=resolved_target_level,
+        )
+    if isinstance(segmenter_plugin, TokenPageSegmenter):
+        segmenter_plugin = TokenPageSegmenter(max_tokens=resolved_max_tokens)
+    sections = segmenter_plugin.segment(document)
+    output_dir = workspace.sources_sections / resolved_doc_id
+    try:
+        output = write_sections(sections, output_dir)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    report = document_quality_report(
+        resolved_doc_id, sections, document.blocks, document_path.parent
+    )
+    report_path = write_quality_report(report, output_dir)
+
+    typer.echo(f"segmenter: {segmenter_name}")
+    typer.echo(f"target_level: {resolved_target_level}")
+    if isinstance(segmenter_plugin, TokenPageSegmenter):
+        typer.echo(f"max_tokens: {resolved_max_tokens}")
+    typer.echo(f"doc_id: {resolved_doc_id}")
+    typer.echo(f"sections: {len(sections)}")
+    typer.echo(f"manifest: {output.manifest}")
+    typer.echo(f"warnings: {report.warning_count}")
+    typer.echo(f"quality: {report_path}")
+    _echo_warnings(report)
+
+
+def _echo_warnings(report: QualityReport, sample: int = 5) -> None:
+    """Surface the quality report inline so an ingest run never hides an anomaly.
+
+    Only a sample is printed — a book with a broken page span usually has many — with
+    the per-code totals and a pointer to the full report for the rest.
+    """
+
+    if not report.warnings:
+        return
+    counts = ", ".join(f"{code}={count}" for code, count in report.warning_counts.items())
+    typer.echo(f"warning: quality checks flagged {report.warning_count} issue(s): {counts}")
+    for warning in report.warnings[:sample]:
+        typer.echo(f"warning: {warning.section_id}: {warning.code}: {warning.message}")
+    remaining = max(0, report.warning_count - sample)
+    if remaining:
+        typer.echo(f"warning: … and {remaining} more (see the quality report above)")

@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from bookgraph.assets import asset_reference
+from bookgraph.models import ASSET_BLOCK_TYPES, CanonicalBlock, Document, Section
+from bookgraph.pdf_metadata import PdfBookmark
+from bookgraph.ports import DocumentSegmenter
+from bookgraph.segmenters.heading import HeadingSegmenter
+from bookgraph.segmenters.pages import clamp_page_end
+from bookgraph.utils import is_url, unique_slug
+
+__all__ = ["BookmarkSegmenter", "PdfBookmark", "bookmark_heading_paths"]
+
+
+@dataclass
+class BookmarkSegmenter(DocumentSegmenter):
+    """Segment a document by PDF outline/bookmark page boundaries.
+
+    The segmenter is deterministic and lightweight: it consumes bookmarks already
+    captured in `sources/inbox/<book_id>/book.json` by `add-book`, then maps their
+    page starts onto canonical parser blocks. If no usable bookmarks are present,
+    it falls back to the heading segmenter.
+    """
+
+    bookmarks: list[PdfBookmark]
+    split_level: int = 1
+    fallback: HeadingSegmenter | None = None
+    name: str = "bookmark"
+
+    def segment(self, document: Document) -> list[Section]:
+        paths = bookmark_heading_paths(self.bookmarks)
+        usable = [
+            (bookmark, path)
+            for bookmark, path in zip(self.bookmarks, paths, strict=True)
+            if bookmark.page_index is not None and bookmark.level <= self.split_level
+        ]
+        # Page order, with outline (TOC) order kept for bookmarks on the same page: the
+        # sort is stable. A title tie-break would put same-page siblings in alphabetical
+        # order (issue #58: a Preface's "Feedback" before "Conventions").
+        usable.sort(key=lambda item: item[0].page_index or 0)
+        if not usable:
+            return (self.fallback or HeadingSegmenter()).segment(document)
+
+        sections: list[Section] = []
+        used_slugs: set[str] = set()
+        for index, (bookmark, path) in enumerate(usable):
+            start_page = bookmark.page_index
+            next_page = usable[index + 1][0].page_index if index + 1 < len(usable) else None
+            blocks = _blocks_in_range(document.blocks, start_page, next_page)
+            section_slug = unique_slug(bookmark.title, used_slugs)
+            sections.append(
+                _to_section(document.doc_id, bookmark, path, blocks, next_page, section_slug)
+            )
+
+        for index, section in enumerate(sections):
+            section.prev_id = sections[index - 1].id if index > 0 else None
+            section.next_id = sections[index + 1].id if index + 1 < len(sections) else None
+        return sections
+
+
+def bookmark_heading_paths(bookmarks: list[PdfBookmark]) -> list[list[str]]:
+    """Each bookmark's outline ancestry, root first and ending with its own title."""
+
+    stack: list[PdfBookmark] = []
+    paths: list[list[str]] = []
+    for bookmark in bookmarks:
+        stack = [ancestor for ancestor in stack if ancestor.level < bookmark.level]
+        stack.append(bookmark)
+        paths.append([entry.title for entry in stack])
+    return paths
+
+
+def _blocks_in_range(
+    blocks: list[CanonicalBlock], start_page: int | None, next_page: int | None
+) -> list[CanonicalBlock]:
+    if start_page is None:
+        return []
+    selected: list[CanonicalBlock] = []
+    for block in blocks:
+        if block.page_idx is None:
+            continue
+        if block.page_idx < start_page:
+            continue
+        if next_page is not None and block.page_idx >= next_page:
+            continue
+        selected.append(block)
+    return selected
+
+
+def _to_section(
+    doc_id: str,
+    bookmark: PdfBookmark,
+    heading_path: list[str],
+    blocks: list[CanonicalBlock],
+    next_page: int | None,
+    section_slug: str,
+) -> Section:
+    page_indices = [block.page_idx for block in blocks if block.page_idx is not None]
+    text_parts = [
+        rendered
+        for block in blocks
+        if block.type != "title" and (rendered := _render_block(block))
+    ]
+    page_start = bookmark.page_index
+    page_end = max(page_indices) if page_indices else None
+    if next_page is not None:
+        # Same shared guard as the heading segmenter: a bookmark page that repeats, runs
+        # out of order, or sits on page 0 must not yield a backwards/negative span.
+        page_end = clamp_page_end(page_start, next_page - 1)
+    return Section(
+        id=f"{doc_id}.{section_slug}",
+        doc_id=doc_id,
+        title=bookmark.title,
+        level=bookmark.level,
+        heading_path=heading_path,
+        page_start=page_start,
+        page_end=page_end,
+        text="\n\n".join(text_parts),
+        block_ids=[block.id for block in blocks],
+        metadata={
+            "segmenter": "bookmark",
+            "bookmark_level": bookmark.level,
+            "bookmark_page_index": bookmark.page_index,
+        },
+    )
+
+
+def _render_block(block: CanonicalBlock) -> str:
+    if block.type not in ASSET_BLOCK_TYPES:
+        text = block.text.strip()
+        if not text or not block.metadata.get("code"):
+            return text
+        language = block.metadata.get("language")
+        fence = f"```{language}" if isinstance(language, str) and language else "```"
+        return f"{fence}\n{text}\n```"
+    reference = asset_reference(block)
+    if not reference or is_url(reference):
+        return block.text.strip()
+    path = Path(reference)
+    if (
+        path.is_absolute()
+        or "\\" in reference
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or len(path.parts) > 2
+        or (len(path.parts) == 2 and path.parts[0] != "images")
+    ):
+        return block.text.strip()
+    caption = block.text.strip()
+    # Match the heading segmenter: an uncaptioned staged asset must not change the
+    # section text/hash merely because a later re-parse discovers it.
+    if not caption:
+        return ""
+    return f"![{caption}](images/{path.name})"
+

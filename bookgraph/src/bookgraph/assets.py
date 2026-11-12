@@ -1,0 +1,123 @@
+"""Resolution of a parsed block's image/table asset reference to a real file.
+
+One resolver, used by every consumer of parsed assets: the MCP section APIs (which
+hand clients an openable ``AssetRef.path``) and the ingest quality checks (which
+must judge an asset exactly as a reader will see it). Two implementations of
+"does this asset exist?" would let ingest and reading disagree about the same
+section, which is the drift :mod:`bookgraph.quality` exists to prevent.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from urllib.parse import unquote
+
+from bookgraph.models import CanonicalBlock
+from bookgraph.utils import is_url
+
+
+def asset_reference(block: CanonicalBlock) -> str:
+    """Return the block's raw asset reference, or ``""`` when it has none.
+
+    Prefers the typed ``asset_path`` (MinerU) and falls back to the markdown
+    parser's ``metadata["src"]``. A block with no reference at all (e.g. a Markdown
+    table rendered inline into the section text) is not an asset file consumer.
+    """
+
+    raw = block.asset_path
+    if raw:
+        return raw
+    meta_src = block.metadata.get("src") or block.metadata.get("asset_path")
+    return str(meta_src) if meta_src else ""
+
+
+def resolve_asset_path(parsed_dir: Path, block: CanonicalBlock) -> str | None:
+    """Resolve a parser's asset reference to a real file under ``parsed_dir``.
+
+    ``parsed_dir`` is the document's ``sources/parsed/<doc_id>/`` directory. The
+    reference is tried under the staged ``images/`` dir that ``MinerURunner`` copies
+    alongside ``document.json`` and directly under the parsed document directory, and
+    the first existing regular file wins — so the location is verified on disk rather
+    than guessed from whether the string contains a slash.
+
+    Returns ``None`` — so the caller drops the asset rather than emit a bogus
+    reference — unless the result is an existing regular file that stays inside the
+    parsed document directory even after symlinks are followed. That rules out URLs,
+    absolute paths, ``..`` traversal, symlink escapes, and references to files the
+    parser never actually staged, so an ``AssetRef.path`` a client receives always
+    opens a real workspace file.
+    """
+
+    raw = asset_reference(block)
+    if not raw or is_url(raw):
+        return None
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        return None
+    try:
+        root_real = parsed_dir.resolve()
+    except (OSError, ValueError):
+        return None
+    # Verify the location on disk instead of guessing from the string: try the staged
+    # images/ dir first (MinerU convention) then directly under the parsed document dir.
+    for base in (parsed_dir / "images", parsed_dir):
+        lexical = Path(os.path.normpath(base / candidate))
+        # Resolve symlinks and check containment against the real root: a lexical-only
+        # check would let a symlink under images/ point outside the workspace, and would
+        # accept a ".."-style path that lands on the root directory itself rather than a
+        # file. Guarded because a corrupt/adversarial document.json can carry a path with
+        # an embedded NUL (ValueError) — one bad asset must degrade to "no asset", not
+        # crash the whole section fetch.
+        try:
+            real = lexical.resolve()
+            if real.is_relative_to(root_real) and real.is_file():
+                return str(lexical)
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def resolve_workspace_link(root: Path, link: str, bases: list[Path]) -> Path | None:
+    """Resolve a Markdown/HTML image link to a regular file inside the workspace.
+
+    The query and fragment are dropped and the path is unquoted. A relative link is
+    tried under each of ``bases`` in order; an absolute one as is. Only a regular file
+    that stays inside ``root`` after symlinks are followed counts. Shared by the
+    translated export (which embeds the file) and the translation structure check
+    (which only asks whether it exists), so the two never disagree about a link.
+    """
+
+    raw = unquote(link.split("#", 1)[0].split("?", 1)[0])
+    if not raw:
+        return None
+    try:
+        root_real = root.resolve()
+    except (OSError, ValueError):
+        return None
+    candidate = Path(raw)
+    options = [candidate] if candidate.is_absolute() else [base / candidate for base in bases]
+    for option in options:
+        try:
+            real = option.resolve()
+            if real.is_relative_to(root_real) and real.is_file():
+                return real
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def asset_link(parsed_dir: Path, path: str) -> str:
+    """A resolved asset ``path`` relative to ``parsed_dir``, as a POSIX link.
+
+    This is the reference an artifact (a translation) should write for the asset —
+    ``images/fig1.png`` rather than an absolute path — and the one the translated
+    export resolves against the parsed document directory.
+    """
+
+    try:
+        return Path(path).resolve().relative_to(parsed_dir.resolve()).as_posix()
+    except (OSError, ValueError):
+        # ``resolve_asset_path`` only returns files inside ``parsed_dir``; keep the
+        # basename rather than leak an absolute path if that ever changes.
+        return Path(path).name

@@ -1,0 +1,279 @@
+# Integrating a reading agent over MCP
+
+This guide wires an AI agent (any MCP client — Claude Code, Claude Desktop, or a
+custom client) to a BookGraph workspace so it can read a document section by
+section, follow the concept graph, and track progress — with **no CLI step**
+between "workspace prepared" and "agent reading".
+
+The MCP server (`bookgraph mcp`) serves one workspace over stdio and exposes only
+the tools below; it never reads the wiki files — it serves from
+`sources/sections/` + `indexes/bookgraph.db` (see `docs/cli/index.md`).
+
+## 1. Prepare a workspace (one-time, per corpus)
+
+```bash
+uv sync --extra mcp
+
+bookgraph init /path/to/ws
+# ingest each document (Markdown/Office via `parse`; raw PDF via add-book + parse-book)
+# parse-book prints a runs/parse-book/*.log path for long raw-PDF runs
+bookgraph parse book.md -o /path/to/ws            # → sources/parsed/<doc_id>/document.json
+bookgraph segment /path/to/ws <doc_id>            # → sources/sections/<doc_id>/…
+bookgraph index build /path/to/ws                 # → indexes/bookgraph.db (search + graph + concepts)
+
+# optional, human-facing wiki (not needed for the agent):
+bookgraph wiki compile /path/to/ws <doc_id> --backend markdown-graph
+bookgraph index concepts /path/to/ws              # → wiki/concepts/<slug>.md
+```
+
+The agent needs only `segment` + `index build`. `search` and the graph tools also
+work before `index build` (live scan of `sections.jsonl`), but concepts
+(`get_concept`, `get_context.concepts`) require the index.
+
+## 2. Serve the workspace
+
+```bash
+bookgraph mcp /path/to/ws        # stdio transport, bound to this one workspace
+```
+
+Tool arguments never take a workspace path — the server is bound to the one you
+launched it with.
+
+## 3. Point an MCP client at it
+
+**Claude Code** (`.mcp.json` in the project, or `claude mcp add`):
+
+```json
+{
+  "mcpServers": {
+    "bookgraph": {
+      "command": "bookgraph",
+      "args": ["mcp", "/path/to/ws"]
+    }
+  }
+}
+```
+
+(If `bookgraph` is not on the client's PATH, use the absolute path to the
+executable, or `uv run --extra mcp bookgraph mcp /path/to/ws`.)
+
+**Claude Desktop** — the same server entry under `mcpServers` in its config file.
+
+## 4. The reading loop
+
+A self-serve agent drives an entire session with these tools alone:
+
+1. `list_documents()` — discover what there is to read (`doc_id`, `title`,
+   `section_count`).
+2. `create_plan(doc_id, daily_sections=N)` — start a reading plan (defaults
+   `plan_id` to `doc_id`). If a plan with that `plan_id` already exists it
+   **errors** rather than wiping its progress — to resume, skip straight to
+   `get_next_section`/`list_plans`; pass a fresh `plan_id` for a separate plan,
+   or `overwrite=True` to deliberately start it over.
+3. Loop:
+   - `get_next_section(plan_id)` — the next up-to-`daily_sections` unread
+     sections, each with full text + provenance, plus `chapter` progress (current
+     chapter, `completed`/`remaining`/`total` in it, and the `next_boundary`). Pass
+     `stop_at_boundary=True` to end a tick at the chapter boundary, and
+     `chapter_level=2` when chapters sit under level-1 parts.
+   - `get_context(doc_id, section_id)` — the section's content, its graph
+     neighbourhood (parent/prev/next/children), its `concepts`, and any `summary`
+     already written for it.
+   - Both `get_section` and `get_context` return the section's figures/tables as a
+     structured `assets` list (each `{block_id, type, path, link, caption, order,
+     page_idx, type_confidence, suggested_type}`) so you never have to grep
+     `sources/parsed/<doc_id>/document.json` for image paths. `path` resolves under the
+     workspace; open it directly to OCR/inspect labels or table content. `link` is the
+     relative reference (e.g. `images/fig1.png`) to write into a translation. `type` is the
+     parser's guess: when `suggested_type` is set the caption contradicts it (a figure
+     emitted as a `table`), so trust the file over the label. Pass
+     `include_assets=false` to omit.
+   - Every section also carries `warnings` — the data-quality anomalies found in it
+     (each `{code, message, block_id, reference}`): a broken page span (`page_range_inverted`,
+     `page_range_incomplete`), a disputed asset type (`asset_type_ambiguous`), an asset
+     file the parser never staged (`asset_file_missing` — the figure is gone, not just
+     unlisted; `reference` is the path the parsed document points at), or a section whose text is only captions / almost no prose around its
+     figures (`asset_captions_only`, `asset_text_sparse`). Read them before trusting `text` or
+     the page provenance; they are the same warnings ingest recorded in
+     `sources/sections/<doc_id>/quality.json`.
+   - Pivot as needed:
+     - `get_concept(concept)` — where a concept is discussed across **all**
+       books (cross-book backlinks). Defaults to a compact card (bare backlinks
+       with per-section glosses) for lightweight traversal; pass
+       `include_annotations=True` for the detail view, where each mention also
+       carries its section's Tier-2 `summary`, so a concept with several mentions
+       reads as a source-grounded note.
+     - `search(query, doc_id=None)` — find related sections (cross-document when
+       `doc_id` is omitted).
+     - `get_chapter_outline(plan_id)` / `get_section_tree(doc_id, section_id)` —
+       orient cheaply: the current chapter's subtree (two levels by default) with
+       read flags and in-chapter counts, or a section's breadcrumb, windowed
+       siblings and children. Pass `chapter_level=2` when chapters sit under
+       parts (a lone book-title root is skipped automatically).
+     - `get_outline(doc_id, root_id=None, max_depth=None)` /
+       `get_related(doc_id, section_id)` — navigate structure. Scope the outline
+       with `root_id` / `max_depth` (e.g. `max_depth=1` for the chapter list); a
+       full outline of a large book can overflow the agent's context.
+   - `annotate_section(doc_id, section_id, concepts=[...], summary="...")` — **feed
+     your judgment back** (see *The reinforcement loop* below): the real concepts of
+     the section (each `{title, gloss}`, `slug` optional) and a prose summary. This is
+     optional per section but is how the concept graph gets smarter over time.
+   - Translating for delivery? `get_section_translation(doc_id, section_id, lang)`
+     first: reuse `content` only when `status` is `fresh` **and** (`includes_assets`
+     or not `section_has_assets`) — `fresh` alone does not mean figures/tables were
+     carried over (`missing_assets` lists the figures/tables to add); otherwise
+     translate the section and cache it with `write_section_translation(..., content,
+     includes_assets=..., source_section_hash=<current_section_hash>)`, linking each
+     figure/table by its `AssetRef.link` — `includes_assets` is checked against those
+     links, and a claim the body does not back is refused. Translate prose and link labels,
+     not structure: link destinations, fragment ids, image/file paths, reference
+     identifiers, HTML anchors, and `{#id}` heading ids stay byte-for-byte; the write
+     result's `structure_issues` lists any that changed. Prefer a block-aligned write:
+     `get_section(doc_id, section_id, include_blocks=True)` lists the source blocks,
+     and `write_section_translation(..., units=[{source_block_ids, content}, ...])`
+     takes one unit per paragraph instead of `content` (several ids merge paragraphs,
+     a repeated id splits one), so `export translated-pdf --mode bilingual`
+     interleaves paragraph by paragraph; `alignment_status` / `alignment_issues` on
+     the result report it (see *Block-aligned translations* in `docs/cli/artifacts.md`).
+     `list_section_artifacts(doc_id, lang)` lists every cached translation with its
+     status, so a job can redo the `stale` ones after a re-segment.
+   - **Keep artifacts publication-clean — use the right channel.** A translation
+     body, annotation summary or gloss is book content only:
+     - QA/checker results and terminology decisions → `write_section_translation(...,
+       notes="...")` (stored in the registry sidecar, returned by
+       `get_section_translation`, never exported);
+     - `MEDIA:/path` markers, `Đã lưu cache/enrich và mark read: …` and other
+       progress lines → your final chat reply;
+     - export coverage/freshness/missing assets → the export's `.report.json`.
+
+     Write translations only through `write_section_translation`, the only
+     translation store. Never write translation files yourself, not under
+     `translations/` and not in any directory of your own (such as a
+     `translation_cache/`): nothing reads them, so the section stays untranslated in
+     the export and in batch completion. Link each figure/table by its
+     `AssetRef.link` (relative, e.g. `images/fig1.png`) — `AssetRef.path` is the
+     absolute file to open, not to write. In a translation job, always pass
+     `translation_lang` to `complete_reading_batch`: without it, nothing checks that
+     a translation was saved. The server sends these rules as its MCP `instructions`
+     at connect time, and the `bookgraph-reader` skill
+     (`.claude/skills/bookgraph-reader/SKILL.md`) spells out the workflow.
+   - `mark_read(plan_id)` — mark the section read (defaults to the next unread) and
+     persist progress. It checks nothing: when the batch involved translation or
+     annotation, advance with `complete_reading_batch` instead (see below), which runs
+     the readiness checks first.
+4. `list_plans()` — resume or report progress across sessions (`completed`/`total`/`done`).
+   For "how many sections are left in this chapter?", call
+   `get_plan_progress(plan_id)` — it answers from the plan + hierarchy without
+   section text or the full outline.
+
+## Completing a batch: the transaction boundary
+
+`mark_read` trusts the caller: an agent whose annotation write or index rebuild failed
+half-way can still advance the plan. A job that does real work per batch — translate,
+inspect figures, annotate, rebuild the index — should advance with
+`complete_reading_batch` instead. It checks the batch and marks **every** section
+read in one atomic write only when nothing blocks; otherwise the plan is untouched
+and the report lists every reason:
+
+```text
+get_next_section(plan_id)                       # the batch
+  … write_section_translation(doc_id, section_id, "vi", units=[...], ...)
+  … open each asset path, annotate_section(...)
+  … bookgraph index build <ws> <doc_id>         # or index="deferred", see below
+complete_reading_batch(plan_id,
+    inspected_assets=["img1", "tbl1"],          # block ids of the figures you opened
+    translation_lang="vi")
+→ {"committed": false, "issues": [{"code": "index_stale", "section_id": "…",
+     "message": "… Run 'bookgraph index build <workspace> <doc_id>'.", "blocking": true}]}
+  … fix, then call again → {"committed": true, "completed": 12, …}
+```
+
+By default it requires, per section, a valid annotation, an index that reflects it
+(`index="fresh"`), and every resolvable figure/table listed in `inspected_assets`.
+Relax what does not apply: `require_annotation=False`, `require_assets=False`,
+`index="deferred"` (report a stale index as `index_rebuild_needed` without blocking —
+for agents that cannot run the CLI and rely on the nightly rebuild) or
+`index="ignore"`. A translation-only job (no annotating, no index build) passes
+`translation_lang="vi", require_annotation=False, index="ignore"` (or `"deferred"`)
+plus the `inspected_assets` it opened. Add `translation_lang` and `artifacts` (path templates with
+`{doc_id}`/`{section_id}`/`{plan_id}`) for outputs your job produces. If you read
+boundary-clipped batches (`get_next_section(plan_id, stop_at_boundary=True)`), pass the
+same `stop_at_boundary` / `chapter_level` here so the default batch is the one you were
+handed. Call `validate_reading_batch` with the same arguments for a dry run. Issue codes and the
+full contract: `docs/cli/commands.md`, *Reading batch completion*.
+
+State (reading-plan progress in `reading_plans/<plan_id>.json` and annotations in
+`annotations/<doc_id>/<section_id>.json`) persists on disk, so a new session resumes
+exactly where the last left off and keeps every annotation ever written.
+
+## The reinforcement loop
+
+The concept graph has two tiers (see `docs/cli/annotations.md`):
+
+- **Tier 1 (auto):** a deterministic tokenizer extracts concepts at `index build` time,
+  so the graph is never empty — but it is "dumb" (false positives, missed concepts).
+- **Tier 2 (agent):** `annotate_section` records the *real* concepts you found while
+  reading, each with a gloss, plus a section summary. Your annotation is the
+  **authoritative concept→section edge set for that section**: on the next rebuild it
+  prunes the tokenizer's spurious mentions and adds the real ones (an empty `concepts`
+  list deliberately zeroes out that section's concepts).
+
+`annotate_section` is **deferred**: it writes only the annotation file — it does not
+touch the index. Two things follow:
+
+- The `summary` shows up **immediately** via `get_context` (it reads the annotation
+  file directly).
+- The concept edges (and their gloss / `(agent-verified)` marker on `wiki/concepts`)
+  take effect only after the next per-document rebuild.
+
+So annotations **compound**: read a book once with light auto concepts, and each night's
+rebuild folds in whatever the agent annotated, so the cross-book graph gets sharper the
+more it is read. A nightly (or post-session) maintenance step re-merges and re-renders:
+
+```bash
+bookgraph index build /path/to/ws              # per-doc: re-merge Tier-1 + Tier-2
+bookgraph index concepts /path/to/ws           # global: re-render wiki/concepts/<slug>.md
+```
+
+As annotations pile up, near-duplicate concepts appear (`metadata-file` vs
+`table-metadata`). `concept_hygiene()` reports likely merges, lint findings, and the
+agent concepts still awaiting review. Surface it to your user rather than acting on it
+yourself: a human curates `concepts/registry.json` with `bookgraph concepts
+alias|canonical|ignore|distinct`, and the next `index build` folds the aliases in.
+After that, `get_concept` resolves an alias slug to its canonical concept (see
+`docs/cli/concepts.md`).
+
+## Agent skills
+
+The repo ships the **`bookgraph-reader`** workflow in two packaging forms:
+
+- `.claude/skills/bookgraph-reader/SKILL.md` — Claude Code / Claude agents
+  (Claude-tuned equivalent).
+- `.agents/skills/bookgraph-reader/SKILL.md` — agent-neutral instructions for
+  Hermes, custom MCP clients, or any agent runtime that can load a procedural
+  `SKILL.md` file.
+
+Both package the same loop — orient → plan → read → explain → follow the concept
+graph → track progress — but the prose can be tuned for the client. Keep the tool
+loop and argument names in sync when either skill changes. With the MCP server
+connected, agents should trigger it on requests like "read the next section" or
+"walk me through this book", so users do not have to know the tool names. Copy the
+matching directory to your client's skill/procedure location to use it across
+projects.
+
+## Notes & current limitations
+
+- **Concept quality** starts from a deterministic tokenizer baseline (it can surface
+  noisy or split concepts) and improves as the agent annotates: `annotate_section`
+  curates concepts + per-section summaries (the reinforcement loop above). Annotating
+  is optional to read but is what sharpens the graph over time.
+- **Ingestion coverage:** documents without useful headings or PDF bookmarks can
+  use the token/page fallback segmenter (`bookgraph segment --segmenter token-page`).
+- **Write surface:** only `create_plan`, `mark_read`, and `complete_reading_batch` write
+  reading plans,
+  `annotate_section` writes a per-section annotation artifact, and
+  `write_section_translation` writes a cached translation + its registry sidecar.
+  Every other tool is read-only. Client-supplied `doc_id`/`plan_id`/`lang` are
+  validated as filesystem-safe slugs before use (`lang` is lowercased first); the
+  `section_id` of `annotate_section` and the translation tools (it contains a dot, so
+  it is not a bare slug) is validated by membership against the document's sections.

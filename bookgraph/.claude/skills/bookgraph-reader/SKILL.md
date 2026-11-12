@@ -1,0 +1,198 @@
+---
+name: bookgraph-reader
+description: Read or study a book/document that lives in a BookGraph workspace, section by section, using the BookGraph MCP tools. Use when the user wants to read, study, work through, summarize, or be walked through a document ingested into BookGraph, or asks to "read the next section", "continue reading", or explain concepts from such a document. Drives list_documents → create_plan → get_next_section → get_context → mark_read and follows the cross-book concept graph.
+---
+
+# BookGraph reader
+
+Be a source-grounded reading companion: walk the user through a document one
+section at a time, explain each section **in your own words but grounded in its
+actual text**, follow the concept graph to connect ideas across books, and track
+progress in a reading plan so sessions resume where they left off.
+
+Every claim you make about the material must come from a section's real content
+(via the tools below) — never from prior knowledge of the book. If the text is
+silent on something, say so.
+
+## Prerequisites
+
+You need the BookGraph MCP server connected (tools appear as `list_documents`,
+`get_next_section`, etc.). The server is bound to one workspace:
+
+```bash
+uv sync --extra mcp
+bookgraph mcp /path/to/workspace     # stdio; add to your MCP client config
+```
+
+If the tools aren't available, tell the user to start/connect that server (see
+`docs/mcp/reading-agent.md`).
+
+**If the document isn't ingested yet** (`list_documents` is empty or missing it),
+it must be prepared once via the CLI — you can run these if the user asks:
+
+```bash
+bookgraph init /path/to/workspace
+bookgraph parse <file> -o /path/to/workspace     # Markdown/Office
+# raw PDF: add-book + parse-book; parse-book prints a runs/parse-book/*.log path
+bookgraph segment /path/to/workspace <doc_id>
+bookgraph index build /path/to/workspace          # enables search + concepts
+```
+
+For large raw PDFs, do not let an agent/cron job silently wait with no progress:
+start or inspect `parse-book` via its durable log path under `runs/parse-book/`.
+Operational details live in `docs/cli/parse-book-large-pdfs.md`.
+
+## The reading loop
+
+1. **Orient** — call `list_documents()`. Show the user the available documents
+   (title, section count) and confirm which one to read if it's ambiguous.
+2. **Start/resume** — call `list_plans()`. If a plan for the target doc exists,
+   resume it; otherwise `create_plan(doc_id, daily_sections=N)` (N = how many
+   sections per "tick"; default 1, ask if the user has a pace in mind).
+3. **Read a tick** — `get_next_section(plan_id)`. For each returned section:
+   - `get_context(doc_id, section_id)` to get the full text, its graph
+     neighbourhood (parent / prev / next / children), and its `concepts`.
+   - Explain the section grounded in its text: the core idea, why it matters, how
+     it connects to the parent/surrounding sections. Quote or cite specifics.
+   - Surface the section's `concepts`; for any the user wants to go deeper on, call
+     `get_concept(concept)` to show where that idea appears **across all books**
+     (cross-book backlinks) and tie the threads together.
+4. **Advance** — once the user is done with a section, `mark_read(plan_id)` (marks
+   the next unread by default) so progress persists. Then loop to step 3.
+5. **Report** — when the user pauses, `list_plans()` to show `completed/total`.
+   For "how many sections until the end of this chapter?", use
+   `get_plan_progress(plan_id)` (or the `chapter` field of `get_next_section`) —
+   don't pull the whole outline. Pass `chapter_level=2` when chapters sit under parts (a lone `# Book Title`
+   root is skipped automatically).
+
+For an **enrichment job** (annotating, translating, or rebuilding the index per
+batch), advance with `complete_reading_batch(plan_id, inspected_assets=[...],
+translation_lang=..., ...)` instead of `mark_read`: it marks the whole batch read
+only after verifying the work, and otherwise returns `committed: false` with
+actionable `issues`. Fix every blocking issue and retry — never advance past a
+failed step. If you read with `get_next_section(stop_at_boundary=True)`, pass the same
+`stop_at_boundary` / `chapter_level` so it completes the batch you were handed.
+`validate_reading_batch` takes the same arguments as a dry run.
+
+## Navigating and connecting
+
+- `search(query, doc_id=None)` — find sections by topic. Omit `doc_id` to search
+  **every** document (cross-document); each hit carries its `doc_id`.
+- `get_chapter_outline(plan_id)` — the current chapter's subtree (two levels by
+  default) with per-section `read` flags and `completed`/`remaining`/`total` for
+  the chapter. This is the cheap answer to "where am I / what's left in this
+  chapter". A lone book-title root is skipped automatically; if the "chapter"
+  comes back as a Part, retry with `chapter_level=2`. While the Part (or book
+  root) heading itself is the next unread section, it is returned alone
+  (`total == 1`) even with `chapter_level=2`. That is expected, so don't keep
+  retrying: read it, `mark_read`, and the next call returns the real chapter.
+- `get_section_tree(doc_id, section_id)` — a section's breadcrumb, siblings and
+  children.
+- `get_outline(doc_id, root_id=None, max_depth=None)` — the heading hierarchy, for
+  jumping around or giving the user a map. On real books, scope it: `max_depth=1`
+  for the chapter list, then `root_id=<chapter>` to drill in. An unscoped outline
+  can be huge.
+- `get_related(doc_id, section_id)` — a section's structural neighbours.
+- `get_concept(concept)` — the cross-book "where else is this discussed" view. Use it
+  whenever a concept recurs, to build the user's mental graph across books.
+
+## Translating sections
+
+When the user wants sections translated (e.g. read in Vietnamese, or delivered to a
+chat), reuse the cache instead of retranslating:
+
+1. `get_section_translation(doc_id, section_id, lang)` — reuse its `content` as-is
+   only when `status` is `fresh` **and** (`includes_assets` or not
+   `section_has_assets`). A fresh translation with `includes_assets` false on a
+   section that has assets left out figures/tables (`missing_assets` lists them,
+   with the `link` to write); mention that or redo it.
+2. Otherwise (`missing`, `stale`, or `untracked` you don't trust) translate the
+   section's real text, then `write_section_translation(doc_id, section_id, lang,
+   content, includes_assets=..., source_section_hash=<current_section_hash>,
+   notes=...)` so the next run reuses it. Link each figure/table by its
+   `AssetRef.link`: `includes_assets` is verified against the body, and
+   `includes_assets=True` for a body missing one is refused.
+   Prefer a **block-aligned** write: `get_section(doc_id, section_id,
+   include_blocks=True)` lists the source blocks (`id`, `type`, `text`); pass
+   `units=[{source_block_ids: ["b12"], content: "<translated paragraph>"}, ...]`
+   instead of `content`, one unit per paragraph in reading order. Several ids in one
+   unit merge paragraphs; the same id in consecutive units splits one. Headings,
+   figures and code may share a unit with their prose or be left out. The bilingual
+   export then interleaves paragraph by paragraph. Foreign ids or units out of order
+   are refused; `alignment_issues` lists text blocks you left untranslated and units
+   that do not start a Markdown block of their own (start each unit with a new
+   paragraph, list, heading or fence — not a list-item continuation).
+   When adding translator-only H3/H4 structure, either keep using block-aligned
+   `units` so the heading is paired with the source block it introduces, or place the
+   heading immediately before the paragraph/block it summarizes. Do not cluster new
+   H3/H4 headings at the top of an unaligned artifact unless they correspond to real
+   source child headings.
+3. Translate content, preserve structural Markdown: translate prose, captions, and
+   link labels, but keep link destinations and fragment ids
+   (`(ch03.html#sec_x)`, `(#fig_y)`), image and file paths, reference-style
+   identifiers, HTML `id`/`name` anchors, and `{#id}` heading ids byte-for-byte.
+   Never point a link at an export anchor yourself: `export translated-pdf`
+   resolves the source destinations to its own section anchors.
+   A non-empty `structure_issues` on the write result lists what changed; fix and
+   rewrite it (`complete_reading_batch` blocks on `translation_structure_changed`).
+4. `list_section_artifacts(doc_id, lang)` shows every cached translation and which
+   are `stale` after a re-segment.
+
+### Three channels — never mix them
+
+A cached translation is reused by later runs and printed in the reading PDF, so it
+must hold **book content only**. Everything else has its own place:
+
+| What | Where it goes |
+| --- | --- |
+| The translated section: headings, prose, tables, figures | `units` (block-aligned, preferred) or `content` of `write_section_translation` |
+| QA/checker results, terminology decisions, "kept X untranslated", doubts about the source | `notes` of `write_section_translation` (stored beside the translation, returned by `get_section_translation`, never exported) |
+| `MEDIA:/path` delivery markers, "Đã lưu cache/enrich và mark read: …", progress, job status | your **final chat reply** only |
+| Coverage, freshness, missing assets of an export | the export's `.report.json` / CLI output — read it, don't copy it into a translation |
+
+Rules:
+
+- Write translations **only** through `write_section_translation` — it is the only
+  translation store. Never write translation files yourself: not under
+  `translations/`, and not in any directory of your own (a `translation_cache/`, a
+  scratch folder). Nothing reads them, so the section stays untranslated in the
+  export and in batch completion. Never paste your chat reply (or a part of it)
+  into `content`.
+- Link each figure/table by its `AssetRef.link` (relative, e.g.
+  `![Hình 1-1](images/fig1-1.png)`), never by `AssetRef.path` (absolute — it is for
+  opening the file). `MEDIA:` belongs to the chat reply, not to `content`.
+- Don't translate export output back into the cache: labels such as `(original)`,
+  `(untracked)`, *Translation status unknown* or *Missing asset: …* are BookGraph
+  status, not book text.
+- Annotation summaries and glosses follow the same rule: book explanation only.
+- After translating, advance with `complete_reading_batch(plan_id,
+  translation_lang=..., ...)`, not plain `mark_read`, and **always pass
+  `translation_lang`** in a translation job: only then does it verify the cached
+  translation exists and is fresh before marking the batch read. Without it the
+  batch completes with nothing saved. A **translation-only** job (no annotating, no
+  index build) also passes `require_annotation=False` and `index="ignore"` (or
+  `"deferred"`), and lists the block ids of the figures it opened in
+  `inspected_assets` — the defaults require an annotation and a fresh index, which
+  such a job never produces.
+
+## Behavior
+
+- **Follow the plan, but stay flexible** — if the user asks about something ahead,
+  use `search` / `get_section` to answer, then return to the plan.
+- **Grounded, not generic** — anchor explanations in the section's real text and
+  cite section titles. If asked something the sections don't cover, say the
+  material doesn't address it rather than filling from memory.
+- **Let the user set the pace** — read one tick, discuss, then advance on their
+  cue. Don't dump the whole book.
+- **Concepts are a baseline** — the concept list is auto-extracted and can be
+  noisy; treat it as a hint, lean on the actual section text for meaning.
+
+## Notes
+
+- Only `create_plan`, `mark_read`, and `complete_reading_batch` (the reading plan),
+  `annotate_section`, and `write_section_translation` change state; everything else
+  is read-only.
+- Concepts require `bookgraph index build`; `search` and the graph tools also work
+  before indexing (live scan), just with rougher ranking.
+- Full tool reference: `docs/cli/commands.md`; setup + client config:
+  `docs/mcp/reading-agent.md`.
