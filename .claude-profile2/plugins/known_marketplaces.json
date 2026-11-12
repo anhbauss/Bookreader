@@ -1,0 +1,10 @@
+{
+  "claude-plugins-official": {
+    "source": {
+      "source": "github",
+      "repo": "anthropics/claude-plugins-official"
+    },
+    "installLocation": "/home/trinh-quoc-bau/Documents/Book_reader/.claude-profile2/plugins/marketplaces/claude-plugins-official",
+    "lastUpdated": "2026-11-11T16:05:03.647Z"
+  }
+}

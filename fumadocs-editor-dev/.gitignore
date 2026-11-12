@@ -1,0 +1,9 @@
+node_modules/
+dist/
+apps/reader/public/content/
+*.tsbuildinfo
+.DS_Store
+.turbo
+.env*
+
+.pnpm-store
