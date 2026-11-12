@@ -1,0 +1,32 @@
+# BookGraph workspace config
+output_root = "/home/trinh-quoc-bau/Documents/Book_reader/workspace"
+
+[parsers]
+default_pdf = "mineru-middle-json"
+default_office = "markitdown"
+default_markdown = "markdown"
+
+[mineru]
+# Profile picks a MinerU 4 tier; explicit knobs below override it.
+# Profiles: fast-text (flash) | balanced (basic) | accurate (advanced)
+#           | local-gpu (standard) | remote-gpu (standard + url)
+profile = "balanced"
+# command = "mineru-kit"
+# tier = "basic"         # flash | basic | standard | advanced
+# ocr_mode = "auto"      # auto | txt | ocr
+# image_analysis = true
+# url = ""               # remote MinerU V1 parse service; API key from MINERU_API_KEY
+# start_page = 0         # 0-based first page
+# end_page = 0           # 0-based last page
+# timeout_seconds = 3600 # 0 disables the timeout
+
+[segmenter]
+default = "heading"
+target_level = 2
+max_tokens = 800
+
+[wiki]
+backend = "llmwiki"
+
+[mcp]
+server = "bookgraph"

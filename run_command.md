@@ -1,147 +1,101 @@
-# Lệnh chạy thử Book Reader
+1. Ingest sách mới và tạo nội dung cho Reader
 
-Tài liệu này chạy workspace hiện có:
+Mở terminal mới:
 
-- Workspace BookGraph: `/home/trinh-quoc-bau/book-reader-e2e.xnovm6`
-- Document ID: `my-book`
-- Reader: `fumadocs-editor-dev/apps/reader`
-- BookGraph HTTP API: `127.0.0.1:8000`
-- Reader Vite: `127.0.0.1:5173`
-
-> Mở **hai cửa sổ terminal** và giữ cả hai lệnh server đang chạy.
-
----
-
-## 1. Cài dependency Reader (chỉ cần sau khi clone/cập nhật dependency)
-
-```bash
-cd /home/trinh-quoc-bau/Documents/Book_reader/fumadocs-editor-dev
-pnpm install
-```
-
-Cảnh báo Node `v22` trong khi dự án khai báo Node `>=24` hiện không chặn Reader chạy. Nên dùng Node 24 trở lên nếu có thể.
-
----
-
-## 2. Sinh lại nội dung Reader từ BookGraph
-
-Chạy sau khi ingest/segment tài liệu mới, hoặc sau khi thay đổi bridge Markdown/MDX:
-
-```bash
 cd /home/trinh-quoc-bau/Documents/Book_reader/bookgraph
+
+uv run bookgraph ingest-pipeline \
+  /home/trinh-quoc-bau/Documents/my-book4 \
+  --output /home/trinh-quoc-bau/book-reader-e2e.xnovm6 \
+  --doc-id my-book4 \
+  --target-level 2 \
+  --daily-sections 1
+
+Sau khi lệnh trên thành công, build nội dung MDX cho giao diện:
 
 uv run bookgraph build-mdx \
   /home/trinh-quoc-bau/book-reader-e2e.xnovm6 \
-  my-book \
+  my-book4 \
   --output-dir /home/trinh-quoc-bau/Documents/Book_reader/fumadocs-editor-dev/apps/reader/public/content
-```
 
-Kết quả sẽ nằm tại:
+Kết quả đúng sẽ nằm ở:
 
-```text
-/home/trinh-quoc-bau/Documents/Book_reader/fumadocs-editor-dev/apps/reader/public/content/my-book/
-```
+/home/trinh-quoc-bau/Documents/Book_reader/fumadocs-editor-dev/apps/reader/public/content/my-book3/
 
-Trong đó có `outline.json` và các file section `.mdx`.
+Đặc biệt, outline đúng là:
+
+/home/trinh-quoc-bau/Documents/Book_reader/fumadocs-editor-dev/apps/reader/public/content/my-book3/outline.json
+
+Không phải đường dẫn lồng my-book3/my-book3/.
 
 ---
 
-## 3. Terminal A — chạy BookGraph HTTP API
+2. Khởi động lại BookGraph API
 
-```bash
+Nếu BookGraph API đang chạy từ trước, dừng nó bằng Ctrl+C, rồi chạy lại để nó thấy document mới:
+
 cd /home/trinh-quoc-bau/Documents/Book_reader/bookgraph
 
 uv run --extra http bookgraph serve-http \
   /home/trinh-quoc-bau/book-reader-e2e.xnovm6 \
   --host 127.0.0.1 \
   --port 8000
-```
 
-Giữ terminal này mở. API sẽ phục vụ:
+Kiểm tra my-book3 đã được API nhận:
 
-- outline, nội dung section và context;
-- tiến độ đọc;
-- translation API;
-- ảnh trong tài liệu qua `/api/assets/...`.
-
-Có thể kiểm tra nhanh API trong một terminal khác:
-
-```bash
 curl http://127.0.0.1:8000/api/documents
-```
+
+Trong kết quả cần có document ID my-book3.
 
 ---
 
-## 4. Terminal B — chạy Reader
+3. Chạy Reader và mở outline
 
-```bash
+Ở terminal khác:
+
 cd /home/trinh-quoc-bau/Documents/Book_reader/fumadocs-editor-dev
 
 pnpm --filter book-reader dev
-```
 
-Mở URL section công thức đã kiểm thử:
+Mở outline của sách mới trên trình duyệt:
 
-```text
-http://127.0.0.1:5173/?doc=my-book&section=my-book.1-3-n-ng-l-ng-v-c-ng-su-t-c-a-t-n-hi-u
-```
+http://127.0.0.1:5173/content/my-book3/outline.json
 
-Reader sẽ render công thức LaTex bằng KaTeX. Nếu đang mở sẵn trang cũ, refresh mạnh bằng `Ctrl+Shift+R`.
+Trong outline.json, tìm một section có trường "id", ví dụ minh họa:
 
----
+{
+  "id": "my-book3.chuong-1-gioi-thieu",
+  "title": "Chương 1. Giới thiệu"
+}
 
-## 5. Kiểm thử nhanh sau khi chạy
+Sau đó mở section đó trong Reader:
 
-### Reader
+http://127.0.0.1:5173/?doc=my-book3&section=my-book3.chuong-1-gioi-thieu
 
-```bash
-cd /home/trinh-quoc-bau/Documents/Book_reader/fumadocs-editor-dev
-
-pnpm --filter book-reader test
-pnpm --filter book-reader types:check
-pnpm --filter book-reader build
-```
-
-### BookGraph / MDX bridge
-
-```bash
-cd /home/trinh-quoc-bau/Documents/Book_reader/bookgraph
-
-uv run --extra dev pytest -q tests/test_mdx_bridge.py
-uv run --extra dev ruff check src/bookgraph/mdx_bridge.py tests/test_mdx_bridge.py
-```
+Thay section ID ví dụ bằng ID thực tế trong outline.json.
 
 ---
 
-## 6. Thêm một tài liệu Markdown mới
+4. Các điểm nên kiểm tra với sách mới
 
-Giả sử nguồn ở `/home/trinh-quoc-bau/Documents/my-book`, có file `.md` và thư mục `images/` nếu có ảnh:
+Để biết code có thực sự tổng quát, hãy ưu tiên mở các section chứa:
 
-```bash
-cd /home/trinh-quoc-bau/Documents/Book_reader/bookgraph
+1. Công thức inline: $...$
+2. Công thức block: $$...$$
+3. Công thức thiếu delimiter $ nhưng có \frac, \sum, \int, \Omega, chỉ số/mũ…
+4. Bảng Markdown chứa công thức.
+5. Bảng có \|x\|, |x|, \left|...\right|.
+6. Bảng HTML gốc, nếu sách có.
+7. Code block Python/C/C++/MATLAB…
+8. Ký hiệu HTML như <sup>, <sub>.
+9. Ảnh, bảng biểu và caption.
 
-uv run bookgraph ingest-pipeline \
-  /home/trinh-quoc-bau/Documents/my-book \
-  --output /home/trinh-quoc-bau/book-reader-e2e.xnovm6 \
-  --doc-id my-book \
-  --target-level 2 \
-  --daily-sections 1
+Nếu có lỗi, gửi lại:
 
-uv run bookgraph build-mdx \
-  /home/trinh-quoc-bau/book-reader-e2e.xnovm6 \
-  my-book \
-  --output-dir /home/trinh-quoc-bau/Documents/Book_reader/fumadocs-editor-dev/apps/reader/public/content
-```
+- URL Reader đang mở;
+- phần text bị lỗi hoặc ảnh chụp;
+- tốt nhất là nội dung section .mdx tương ứng trong:
 
-Sau đó restart BookGraph API nếu nó đang chạy, rồi mở Reader với document ID và section ID trong `outline.json`:
+/home/trinh-quoc-bau/Documents/Book_reader/fumadocs-editor-dev/apps/reader/public/content/my-book3/
 
-```text
-http://127.0.0.1:5173/?doc=my-book&section=<section-id>
-```
-
-đường dẫn outline.json:
-/home/trinh-quoc-bau/Documents/Book_reader/fumadocs-editor-dev/apps/reader/public/content/my-book/my-book/outline.json
-
-truy cập trên web:
-http://127.0.0.1:5173/?doc=my-book&section=my-book.t-n-hi-u-v-h-th-ng
-> Không thêm `my-book` vào `--output-dir`: lệnh `build-mdx` tự tạo thư mục `<output-dir>/<doc-id>`. Nếu thêm sẵn, đường dẫn sẽ bị lồng thành `content/my-book/my-book/` và Reader không tìm thấy nội dung.
+Như vậy có thể xác định rõ lỗi nằm ở bước trích xuất/BookGraph MDX bridge hay ở Reader renderer.

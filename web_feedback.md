@@ -1,166 +1,78 @@
-Feedback_1: Vẫn còn một số chỗ chưa hiện được công thức
-Minh chứng:
-he goal in the curve fitting problem is to be able to make predictions for the target variable t given some new value of the input variable x on the basis of a set of training data comprising N input values 
-x
-=
-(
-x
-1
-,
-\hdots
-,
-x
-N
-)
-T
-x=(x 
-1
-​
- ,\hdots,x 
-N
-​
- ) 
-T
-  and their corresponding target values 
-t
-=
-Ω
-^
-(
-t
-1
-,
-…
-,
-t
-N
-)
-T
-t= 
-Ω
- (t 
-1
-​
- ,…,t 
-N
-​
- ) 
-T
-  . We can express our uncertainty over the value of the target variable using a probability distribution. For this purpose, we shall assume that, given the value of x, the corresponding value of t has a Gaussian distribution with a mean equal to the value 
-y
-(
-x
-,
-w
-)
-y(x,w) of the polynomial curve given by (1.1). Thus we have
-
-(Tiếp)...
-I have tried to use a consistent notation throughout the book, although at times this means departing from some of the conventions used in the corresponding research literature. Vectors are denoted by lower case bold Roman letters such as x, and all vectors are assumed to be column vectors. A superscript T denotes the transpose of a matrix or vector, so that 
-x
-T
-x 
-T
-  will be a row vector. Uppercase bold roman letters, such as M, denote matrices. The notation 
-(
-w
-1
-,
-…
-,
-w
-M
-)
-(w 
-1
-​
- ,…,w 
-M
-​
- ) denotes a row vector with M elements, while the corresponding column vector is written as 
-w
-=
-(
-w
-1
-,
-\hdots
-,
-w
-M
-)
-T
-w=(w 
-1
-​
- ,\hdots,w 
-M
-​
- ) 
-T
- 
-
-The notation 
-[
-a
-,
-b
-]
-[a,b] is used to denote the closed interval from a to 
-b
-,
-b, that is the interval including the values a and b themselves, while 
-(
-a
-,
-b
-)
-(a,b) denotes the corresponding open interval, that is the interval excluding a and b. Similarly, 
-[
-a
-,
-b
-)
-[a,b) denotes an interval that includes 
-a
-a but excludes b. For the most part, however, there will be little need to dwell on such refinements as whether the end points of an interval are included or not.
-(Tiếp)...
-Table 1.3 The joint distribution 
+Feedback: Còn mỗi số lượng nhỏ công thức chưa hiển thị được:
+Tổng hợp:
+Minh chứng 1:
+We now wish to identify a prior distribution 
 p
 (
-x
+μ
 ,
-y
+λ
 )
-p(x,y) for two binary variables x and y used in Exercise 1.39.
+p(μ,λ) that has the same functiona dependence on 
+μ
+μ and λ as the likelihood function and that should therefore take the form
 
-x \begin{array}{c c c} & y \ & 0 & 1 \ \hline 0 & 1 / 3 & 1 / 3 \ 1 & 0 & 1 / 3 \end{array}
-1.31 ( ) www Consider two variables x and y having joint distribution 
+\begin{array}{l} p (\mu , \lambda) \propto \left[ \lambda^ {1 / 2} \exp \left(- \frac {\lambda \mu^ {2}}{2}\right) \right] ^ {\beta} \exp \left{c \lambda \mu - d \lambda \right} \ = \exp \left\{- \frac {\beta \lambda}{2} (\mu - c / \beta) ^ {2} \right\} \lambda^ {\beta / 2} \exp \left\{- \left(d - \frac {c ^ {2}}{2 \beta}\right) \lambda \right\} \end{array}
+where 
+c
+,
+d
+,
+c,d, , and 
+β
+β are constants. Since we can always write 
 p
 (
-x
+μ
 ,
-y
+λ
 )
-p(x,y) . Show that the differential entropy of this pair of variables satisfies
+=
+p
+(
+μ
+∣
+λ
+)
+p
+(
+λ
+)
+p(μ,λ)=p(μ∣λ)p(λ) we can find 
+p
+(
+μ
+∣
+λ
+)
+p(μ∣λ) and 
+p
+(
+λ
+)
+p(λ) by inspection. In particular, we see that 
+p
+(
+μ
+∣
+λ
+)
+p(μ∣λ) is a Gaussian whose precision is a linear function of λ and that 
+p
+(
+λ
+)
+p(λ) is a gamma distribution, so that the normalized prior takes the form
 
-H
-[
-x
+Minh chứng 2:
+of the first kind (Abramowitz and Stegun, 1965) and is defined by
+
+I _ {0} (m) = \frac {1}{2 \pi} \int_ {0} ^ {2 \pi} \exp \left{m \cos \theta \right} d \theta .
+For large 
+m
 ,
-y
-]
-⩽
-H
-[
-x
-]
-+
-H
-[
-y
-]
-(Tiếp)...
+m,
+Minh chứng 3:
 Expressing the right-hand side as the exponential of the logarithm, we have
 
 \begin{array}{r c l} p (x | \mu) & = & \exp \left{x \ln \mu + (1 - x) \ln (1 - \mu) \right} \ & = & (1 - \mu) \exp \left\{\ln \left(\frac {\mu}{1 - \mu}\right) x \right\}. \end{array}
@@ -176,3 +88,173 @@ ln
 −
 μ
 )
+Minh chứng 4:
+where 
+w
+=
+(
+w
+0
+,
+\hdots
+,
+w
+M
+−
+1
+)
+T
+w=(w 
+0
+​
+ ,\hdots,w 
+M−1
+​
+ ) 
+T
+  and
+Minh chứng 5:
+and find expressions to relate the new parameters 
+{
+u
+1
+,
+.
+.
+.
+,
+u
+M
+}
+{u 
+1
+​
+ ,...,u 
+M
+​
+ } to the original parameters 
+{
+w
+1
+,
+\hdots
+,
+w
+M
+}
+{w 
+1
+​
+ ,\hdots,w 
+M
+​
+ }
+ Minh chứng 6: (Tiêu đề)
+ <sub>11.1.3</sub> <sub>Adaptive</sub> <sub>rejection</sub> <sub>sampling</sub>
+Sampling Methods
+
+11.1.3 Adaptive rejection sampling
+In many instances where we might wish to apply rejection sampling, it proves difficult to determine a suitable analytic form for the envelope distribution 
+q
+(
+z
+)
+q(z) . An alternative approach is to construct the envelope function on the fly b
+
+Minh chứng 7:
+10.31 ( ) By finding the second derivative with respect to x, show that the function f ( x ) = { \dot { - } } \ln ( e ^ { x { \mathord { \left/ { \vphantom { \mathrm { 1 2 } } } \right. \kern - delimiterspace } 2 } } + e ^ { - x / 2 } ) is a concave function of 
+x
+.
+x. Now consider the second derivatives with respect to the variable 
+x
+2
+x 
+Minh chứng 8:
+ then takes the form
+
+g (\lambda) = \min _ {x} \left{\lambda x - f (x) \right} = - \lambda \ln \lambda - (1 - \lambda) \ln (1 - \lambda)
+which we
+\
+g (\lambda) = \min _ {x} \left{\lambda x - f (x) \right}.
+
+Minh chứng 9:
+Different values of λ correspond to different tangent lines, and because all such lines are lower bounds on the function, we have 
+f
+(
+x
+)
+⩾
+y
+(
+x
+,
+λ
+)
+f(x)⩾y(x,λ) . Thus we can write the function in the form
+
+f (x) = \max _ {\lambda} \left{\lambda x - \lambda + \lambda \ln (- \lambda) \right}.
+We have succeeded in approximating the convex function 
+f
+(
+x
+)
+f(x) by a simpler, linear function 
+y
+(
+x
+,
+λ
+)
+y(x,λ) . The price we have paid is that we have introduced a variational parameter λ, and to obtain the tightest bound we must optimize with respect to λ.
+
+We can formulate this approach more generally using the framework of convex duality (Rockafellar, 1972; Jordan et al., 1999). Consider the illustration of a convex function 
+f
+(
+x
+)
+f(x) shown in the left-hand plot in Figure 10.11. In this example, the function λx is a lower bound on 
+f
+(
+x
+)
+f(x) but it is not the best lower bound that can be achieved by a linear function having slope λ, because the tightest bound is given by the tangent line. Let us write the equation of the tangent line, having slope λ as 
+λ
+x
+−
+g
+(
+λ
+)
+λx−g(λ) where the (negative) intercept 
+g
+(
+λ
+)
+g(λ) clearly depends on the slope λ of the tangent. To determine the intercept, we note that the line must be moved vertically by an amount equal to the smallest vertical distance between the line and the function, as shown in Figure 10.11. Thus
+
+\begin{array}{r c l} g (\lambda) & = & - \min _ {x} \left{f (x) - \lambda x \right} \ & = & \max _ {x} \left{\lambda x - f (x) \right}. \end{array}
+Now, instead of fixing λ and varying x, we can consider a particular x and then adjust λ until the tangent plane is tangent at that particular x. Because the y value of the tangent line at a particular x is maximized when that value coincides with its contact point, we have
+
+f (x) = \max _ {\lambda} \left{\lambda x - g (\lambda) \right}.
+We see that the functions 
+f
+(
+x
+)
+f(x) and 
+g
+(
+λ
+)
+g(λ) play a dual role, and are related through (10.129) and (10.130).
+Minh chứng 10:
+If we have a prior 
+p
+(
+m
+)
+p(m) over graphs indexed by m, then the posterior distribution is given by
+
+p (m | \mathcal {D}) \propto p (m) p (\mathcal {D} | m)\tag{8.103}
+
+where is the observed data set. 

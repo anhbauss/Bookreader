@@ -1,0 +1,16 @@
+---
+id: "tin-hieu-he-thong.10-6-variational-logistic-regression"
+doc_id: "tin-hieu-he-thong"
+title: "10.6. Variational Logistic Regression"
+level: 2
+heading_path: ["Approximate Inference", "10.6. Variational Logistic Regression"]
+page_start: null
+page_end: null
+prev_id: "tin-hieu-he-thong.10-5-local-variational-methods"
+next_id: "tin-hieu-he-thong.10-6-1-variational-posterior-distribution"
+block_ids: ["b5473", "b5474"]
+---
+
+## 10.6. Variational Logistic Regression
+
+We now illustrate the use of local variational methods by returning to the Bayesian logistic regression model studied in Section 4.5. There we focussed on the use of the Laplace approximation, while here we consider a variational treatment based on the approach of Jaakkola and Jordan (2000). Like the Laplace method, this also leads to a Gaussian approximation to the posterior distribution. However, the greater flexibility of the variational approximation leads to improved accuracy compared to the Laplace method. Furthermore (unlike the Laplace method), the variational approach is optimizing a well defined objective function given by a rigourous bound on the model evidence. Logistic regression has also been treated by Dybowski and Roberts (2005) from a Bayesian perspective using Monte Carlo sampling techniques.
