@@ -1,0 +1,57 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.2-4-2-conjugate-priors",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.2-4-2-conjugate-priors.md",
+  "source_section_hash": "sha256:bc5f37eb8d945bd48634814eea802db29c359efa1c23b7dae2230b6058d3853e",
+  "content_hash": "sha256:f64fec0683a5b9aef1f3d147ca60292428a9613dd14ca4c474a7c6319650f264",
+  "includes_assets": false,
+  "model": "manual-block-aligned-vi-preview",
+  "created_at": "2026-11-12T17:31:58.525287+00:00",
+  "notes": "First block-aligned Vietnamese batch artifact. Equations use explicit display-math blocks; source equation tags are omitted for KaTeX compatibility.",
+  "alignment": [
+    {
+      "source_block_ids": [
+        "b1383"
+      ],
+      "start": 0,
+      "end": 29
+    },
+    {
+      "source_block_ids": [
+        "b1384"
+      ],
+      "start": 31,
+      "end": 618
+    },
+    {
+      "source_block_ids": [
+        "b1385"
+      ],
+      "start": 620,
+      "end": 792
+    },
+    {
+      "source_block_ids": [
+        "b1386"
+      ],
+      "start": 794,
+      "end": 1087
+    },
+    {
+      "source_block_ids": [
+        "b1387"
+      ],
+      "start": 1089,
+      "end": 1321
+    },
+    {
+      "source_block_ids": [
+        "b1388"
+      ],
+      "start": 1323,
+      "end": 1572
+    }
+  ]
+}

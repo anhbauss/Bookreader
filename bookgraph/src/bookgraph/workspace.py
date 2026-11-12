@@ -102,6 +102,11 @@ class WorkspacePaths:
         return self.root / "runs"
 
     @property
+    def translation_coverage_root(self) -> Path:
+        """Durable progress records for backend-managed progressive translations."""
+        return self.runs_root / "translation-coverage"
+
+    @property
     def exports_root(self) -> Path:
         """Reader-facing exports such as ``bookgraph export translated-pdf`` output."""
         return self.root / "exports"
@@ -120,6 +125,7 @@ class WorkspacePaths:
             self.translations_root,
             self.reading_plans_root,
             self.runs_root,
+            self.translation_coverage_root,
         ]
 
     def as_mapping(self) -> dict[str, Path]:
@@ -172,6 +178,14 @@ max_tokens = 800
 
 [wiki]
 backend = "llmwiki"
+
+[translation]
+# Use an OpenAI-compatible routing endpoint. The secret key is supplied only as
+# BOOKGRAPH_TRANSLATION_API_KEY to the BookGraph server process.
+# provider = "openai-compatible"
+# base_url = "https://router.example/v1"
+# model = "provider/model"
+# timeout_seconds = 120
 
 [mcp]
 server = "bookgraph"

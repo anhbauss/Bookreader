@@ -1,10 +1,16 @@
-import type { SectionTranslation } from "./api";
+import type { SectionTranslation, TranslationCoverage } from "./api";
 
 export type ReadingMode = "original" | "translation" | "bilingual";
 
 export interface TranslationState {
   status: "idle" | "loading" | "ready" | "error";
   translation: SectionTranslation | null;
+  error: string | null;
+}
+
+export interface TranslationCoverageState {
+  status: "idle" | "loading" | "ready" | "error";
+  coverage: TranslationCoverage | null;
   error: string | null;
 }
 
@@ -34,6 +40,13 @@ export function translationNotice(state: TranslationState): string | null {
     return "This translation omits figures or tables from the source section and is not displayed.";
   }
   return null;
+}
+
+export function isSectionInsideCoverage(
+  coverage: TranslationCoverage | null,
+  sectionIndex: number,
+): boolean {
+  return Boolean(coverage && sectionIndex >= 0 && sectionIndex < coverage.target_sections);
 }
 
 export function translationWarning(state: TranslationState): string | null {

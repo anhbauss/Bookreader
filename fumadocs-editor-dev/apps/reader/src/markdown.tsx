@@ -88,6 +88,18 @@ function splitTableRow(line: string): string[] {
   return cells;
 }
 
+function formatEmphasis(text: string, key: string) {
+  return text.split(/(\*\*[^*\n]+\*\*|\*[^*\n]+\*)/g).map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={`${key}-strong-${index}`}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return <em key={`${key}-em-${index}`}>{part.slice(1, -1)}</em>;
+    }
+    return <Fragment key={`${key}-text-${index}`}>{part}</Fragment>;
+  });
+}
+
 function inline(text: string, key: string) {
   const normalized = text
     .replace(/\\\{([^{}\n]*)\\\}/g, "{$1}")
@@ -106,7 +118,7 @@ function inline(text: string, key: string) {
         ? <sup key={`${key}-sup-${index}`}>{htmlScript[2]}</sup>
         : <sub key={`${key}-sub-${index}`}>{htmlScript[2]}</sub>;
     }
-    return <Fragment key={`${key}-text-${index}`}>{part}</Fragment>;
+    return <Fragment key={`${key}-text-${index}`}>{formatEmphasis(part, `${key}-${index}`)}</Fragment>;
   });
 }
 

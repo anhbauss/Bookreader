@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.2-4-3-noninformative-priors",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.2-4-3-noninformative-priors.md",
+  "source_section_hash": "sha256:e4e61d2a62143ab0295d0f03f4b642af5154a0dd8026d5f5a053673831dc56c0",
+  "content_hash": "sha256:c41506ec8a19cd6743d112b19ab63ac99b12774063fd48c60604363515d865c2",
+  "includes_assets": false,
+  "model": "manual-full-vi-preview-repaired",
+  "created_at": "2026-11-12T17:15:14.837272+00:00",
+  "notes": "Repaired Vietnamese UI-preview artifact: valid Markdown and KaTeX delimiters; equations use explicit display-math blocks.",
+  "alignment": null
+}

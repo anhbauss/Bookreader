@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.information-science-and-statistics",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.information-science-and-statistics.md",
+  "source_section_hash": "sha256:fd2061d0eaa6f4a314de5386dc15ce0d543da6bd3ff03747cf8d391f97a489a2",
+  "content_hash": "sha256:612df376502b1e0418e5a1dfc562f54b45069eb56f30790658dabe6f6dd69720",
+  "includes_assets": false,
+  "model": "manual-vi-demo",
+  "created_at": "2026-11-12T15:47:51.427703+00:00",
+  "notes": "Temporary Vietnamese UI demo; remove after visual review.",
+  "alignment": null
+}

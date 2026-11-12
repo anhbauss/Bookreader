@@ -57,12 +57,21 @@ class ReadingPlanConfig:
 
 
 @dataclass(frozen=True)
+class TranslationConfig:
+    provider: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+    timeout_seconds: int = 120
+
+
+@dataclass(frozen=True)
 class BookGraphConfig:
     parsers: ParserConfig = ParserConfig()
     mineru: MinerUConfig = MinerUConfig()
     segmenter: SegmenterConfig = SegmenterConfig()
     wiki: WikiConfig = WikiConfig()
     reading_plan: ReadingPlanConfig = ReadingPlanConfig()
+    translation: TranslationConfig = TranslationConfig()
 
 
 def load_config(workspace: WorkspacePaths) -> BookGraphConfig:
@@ -111,6 +120,12 @@ def load_config(workspace: WorkspacePaths) -> BookGraphConfig:
         wiki=WikiConfig(backend=_string_at(payload, ["wiki", "backend"], "llmwiki")),
         reading_plan=ReadingPlanConfig(
             daily_sections=_positive_int_at(payload, ["reading_plan", "daily_sections"], 1)
+        ),
+        translation=TranslationConfig(
+            provider=_optional_string_at(payload, ["translation", "provider"]),
+            base_url=_optional_url_at(payload, ["translation", "base_url"]),
+            model=_optional_string_at(payload, ["translation", "model"]),
+            timeout_seconds=_positive_int_at(payload, ["translation", "timeout_seconds"], 120),
         ),
     )
 

@@ -42,6 +42,17 @@ describe("MarkdownArticle math rendering", () => {
     expect(html).not.toContain("&lt;sup&gt;");
   });
 
+  it("renders emphasis without interpreting TeX or inline code as Markdown", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownArticle source="A **noninformative prior** (*prior*) has $p(\\lambda)=\\mathrm{const}$ and `**literal**`." />,
+    );
+
+    expect(html).toContain("<strong>noninformative prior</strong>");
+    expect(html).toContain("<em>prior</em>");
+    expect(html).toContain('class="katex"');
+    expect(html).toContain("**literal**");
+  });
+
   it("typesets raw LaTeX in a table cell", () => {
     const html = renderToStaticMarkup(
       <MarkdownArticle source={"| Rule | Value |\n| --- | --- |\n| Delay | x _ \\{0\\} = \\frac \\{1\\}\\{2\\} |"} />,

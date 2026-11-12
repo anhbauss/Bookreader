@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canShowTranslation, resolveReadingMode, translationNotice, translationWarning, type TranslationState } from "./translation";
+import { canShowTranslation, isSectionInsideCoverage, resolveReadingMode, translationNotice, translationWarning, type TranslationState } from "./translation";
 
 const fresh: TranslationState = {
   status: "ready",
@@ -55,5 +55,17 @@ describe("translation reader state", () => {
     expect(translationNotice({ status: "loading", translation: null, error: null })).toMatch(/loading/i);
     expect(translationNotice({ status: "ready", translation: { ...fresh.translation!, status: "missing", content: null }, error: null })).toMatch(/no translation/i);
     expect(translationNotice({ status: "error", translation: null, error: "network" })).toMatch(/network/i);
+  });
+
+  it("recognizes only the requested prefix as bilingual coverage", () => {
+    const coverage = {
+      doc_id: "signals", lang: "vi", requested_percent: 10,
+      total_sections: 20, target_sections: 2, ready_sections: 2,
+      pending_sections: 0, failed_sections: 0, status: "ready" as const,
+      current_section_id: null, next_section_id: "signals.2", failures: {},
+    };
+    expect(isSectionInsideCoverage(coverage, 0)).toBe(true);
+    expect(isSectionInsideCoverage(coverage, 1)).toBe(true);
+    expect(isSectionInsideCoverage(coverage, 2)).toBe(false);
   });
 });

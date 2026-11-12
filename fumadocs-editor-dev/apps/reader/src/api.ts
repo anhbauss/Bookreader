@@ -46,6 +46,23 @@ export interface SectionTranslation {
   structure_issues: Array<{ kind: string; target: string; change: "missing" | "added"; count: number }>;
 }
 
+export type TranslationCoverageStatus = "missing" | "queued" | "running" | "ready" | "failed";
+
+export interface TranslationCoverage {
+  doc_id: string;
+  lang: string;
+  requested_percent: number;
+  total_sections: number;
+  target_sections: number;
+  ready_sections: number;
+  pending_sections: number;
+  failed_sections: number;
+  status: TranslationCoverageStatus;
+  current_section_id: string | null;
+  next_section_id: string | null;
+  failures: Record<string, string>;
+}
+
 interface ApiErrorPayload {
   error?: string;
   message?: string;
@@ -96,6 +113,31 @@ export function getSectionTranslation(
   if (!/^[a-z]{2,3}(?:-[a-z0-9]+)*$/i.test(language)) throw new Error("Invalid translation language");
   return request<SectionTranslation>(
     `/api/documents/${encodeURIComponent(docId)}/sections/${encodeURIComponent(sectionId)}/translations/${encodeURIComponent(language)}`,
+  );
+}
+
+export function getTranslationCoverage(docId: string, language: string): Promise<TranslationCoverage> {
+  requireSafe(docId, "document id");
+  if (!/^[a-z]{2,3}(?:-[a-z0-9]+)*$/i.test(language)) throw new Error("Invalid translation language");
+  return request<TranslationCoverage>(
+    `/api/documents/${encodeURIComponent(docId)}/translations/${encodeURIComponent(language)}/coverage`,
+  );
+}
+
+export function startTranslationCoverage(docId: string, language: string, percent: 5 | 10 | 25 | 100): Promise<TranslationCoverage> {
+  requireSafe(docId, "document id");
+  return request<TranslationCoverage>(
+    `/api/documents/${encodeURIComponent(docId)}/translations/${encodeURIComponent(language)}/coverage`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ percent }) },
+  );
+}
+
+export function translateNextSection(docId: string, language: string, currentSectionId: string): Promise<TranslationCoverage> {
+  requireSafe(docId, "document id");
+  requireSafe(currentSectionId, "section id");
+  return request<TranslationCoverage>(
+    `/api/documents/${encodeURIComponent(docId)}/translations/${encodeURIComponent(language)}/next`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ current_section_id: currentSectionId }) },
   );
 }
 

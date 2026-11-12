@@ -7,6 +7,7 @@ and serves allowlisted staged images. Install it with ``bookgraph[http]``.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -120,6 +121,69 @@ def create_app(workspace: WorkspacePaths) -> Any:
             )
         )
 
+    active_workers: set[tuple[str, str]] = set()
+    workers_guard = threading.Lock()
+
+    def start_worker(doc_id: str, lang: str) -> None:
+        key = (doc_id, lang)
+        with workers_guard:
+            if key in active_workers:
+                return
+            active_workers.add(key)
+
+        def run() -> None:
+            try:
+                service.run_requested_translations(workspace, doc_id, lang)
+            finally:
+                with workers_guard:
+                    active_workers.discard(key)
+
+        threading.Thread(
+            target=run,
+            daemon=True,
+            name=f"bookgraph-translation-{doc_id}-{lang}",
+        ).start()
+
+    async def translation_coverage(request: Request) -> Any:
+        return response(
+            lambda: service.get_translation_coverage(
+                workspace, request.path_params["doc_id"], request.path_params["lang"]
+            )
+        )
+
+    async def start_translation_coverage(request: Request) -> Any:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or isinstance(payload.get("percent"), bool):
+                raise ReadingServiceError("Request body must contain an integer percent.")
+            percent = payload.get("percent")
+            if not isinstance(percent, int):
+                raise ReadingServiceError("Request body must contain an integer percent.")
+            view = service.request_translation_coverage(
+                workspace, request.path_params["doc_id"], request.path_params["lang"], percent
+            )
+            start_worker(request.path_params["doc_id"], request.path_params["lang"])
+            return JSONResponse(_public_view(view))
+        except ReadingServiceError as exc:
+            return _error(JSONResponse, 400, "service_error", str(exc))
+
+    async def translate_next(request: Request) -> Any:
+        try:
+            payload = await request.json()
+            section_id = payload.get("current_section_id") if isinstance(payload, dict) else None
+            if not isinstance(section_id, str):
+                raise ReadingServiceError("Request body must contain current_section_id.")
+            view = service.request_next_translation(
+                workspace,
+                request.path_params["doc_id"],
+                request.path_params["lang"],
+                section_id,
+            )
+            start_worker(request.path_params["doc_id"], request.path_params["lang"])
+            return JSONResponse(_public_view(view))
+        except ReadingServiceError as exc:
+            return _error(JSONResponse, 400, "service_error", str(exc))
+
     async def concept(request: Request) -> Any:
         return response(lambda: service.get_concept(workspace, request.path_params["concept"]))
 
@@ -162,6 +226,21 @@ def create_app(workspace: WorkspacePaths) -> Any:
             "/api/documents/{doc_id:str}/sections/{section_id:str}/translations/{lang:str}",
             translation,
             methods=["GET"],
+        ),
+        Route(
+            "/api/documents/{doc_id:str}/translations/{lang:str}/coverage",
+            translation_coverage,
+            methods=["GET"],
+        ),
+        Route(
+            "/api/documents/{doc_id:str}/translations/{lang:str}/coverage",
+            start_translation_coverage,
+            methods=["POST"],
+        ),
+        Route(
+            "/api/documents/{doc_id:str}/translations/{lang:str}/next",
+            translate_next,
+            methods=["POST"],
         ),
         Route("/api/concepts/{concept:str}", concept, methods=["GET"]),
         Route("/api/assets/{doc_id:str}/{basename:str}", asset, methods=["GET"]),

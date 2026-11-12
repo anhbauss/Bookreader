@@ -78,6 +78,13 @@ from bookgraph.mcp.views import (
     SectionTree,
     SectionView,
 )
+from bookgraph.translation_coverage import (
+    TranslationCoverageView,
+    get_translation_coverage,
+    request_next_translation,
+    request_translation_coverage,
+    run_requested_translations,
+)
 
 __all__ = [
     "AnnotationResult",
@@ -111,6 +118,7 @@ __all__ = [
     "SectionArtifactView",
     "SectionContext",
     "SectionNotFoundError",
+    "TranslationCoverageView",
     "SectionRef",
     "SectionTree",
     "SectionView",
@@ -128,10 +136,14 @@ __all__ = [
     "get_section",
     "get_section_translation",
     "get_section_tree",
+    "get_translation_coverage",
     "list_documents",
     "list_plans",
     "list_section_artifacts",
     "mark_read",
+    "request_next_translation",
+    "request_translation_coverage",
+    "run_requested_translations",
     "search_sections",
     "write_section_translation",
 ]

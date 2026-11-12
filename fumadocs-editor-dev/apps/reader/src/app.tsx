@@ -1,13 +1,22 @@
 import { BookOpen, ChevronLeft, ChevronRight, Menu, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { getReadingProgress, getSectionContext, getSectionTranslation, markSectionRead, type SectionContext } from "./api";
+import {
+  getReadingProgress,
+  getSectionContext,
+  getSectionTranslation,
+  getTranslationCoverage,
+  markSectionRead,
+  startTranslationCoverage,
+  translateNextSection,
+  type SectionContext,
+} from "./api";
 import { loadOutline, loadSection } from "./content";
 import { MarkdownArticle } from "./markdown";
 import { MemoryPanel, ProgressPanel } from "./reader-panels";
 import { planIdForDocument, progressFromMarkRead, type MarkReadState, type ReaderProgressState } from "./reading";
 import { canonicalSectionId, sectionUrl, validateReaderRoute } from "./reader";
-import { ReadingModePicker, TranslationContent } from "./translation-panel";
-import { resolveReadingMode, type ReadingMode, type TranslationState } from "./translation";
+import { CoveragePanel, ReadingModePicker, TranslationContent } from "./translation-panel";
+import { isSectionInsideCoverage, resolveReadingMode, type ReadingMode, type TranslationCoverageState, type TranslationState } from "./translation";
 import type { ReaderOutline, ReaderSection } from "./types";
 
 const TRANSLATION_LANGUAGE = import.meta.env.VITE_BOOKGRAPH_TRANSLATION_LANGUAGE?.trim() || "vi";
@@ -37,6 +46,8 @@ export function App() {
   const [markState, setMarkState] = useState<MarkReadState>({ status: "idle", message: null });
   const [mode, setMode] = useState<ReadingMode>(() => resolveReadingMode(new URLSearchParams(window.location.search).get("mode")));
   const [translationState, setTranslationState] = useState<TranslationState>({ status: "idle", translation: null, error: null });
+  const [coverageState, setCoverageState] = useState<TranslationCoverageState>({ status: "idle", coverage: null, error: null });
+  const [translationAction, setTranslationAction] = useState<"idle" | "starting" | "next">("idle");
 
   useEffect(() => {
     const updateLocation = () => {
@@ -113,10 +124,63 @@ export function App() {
     return () => { cancelled = true; };
   }, [location]);
 
+  useEffect(() => {
+    if (!location.docId || validateReaderRoute(location.docId, location.sectionId) !== null) return;
+    let cancelled = false;
+    const loadCoverage = () => void getTranslationCoverage(location.docId, TRANSLATION_LANGUAGE)
+      .then((coverage) => { if (!cancelled) setCoverageState({ status: "ready", coverage, error: null }); })
+      .catch((reason: unknown) => { if (!cancelled) setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" }); });
+    setCoverageState((previous) => ({ status: previous.coverage ? "ready" : "loading", coverage: previous.coverage, error: null }));
+    loadCoverage();
+    const timer = window.setInterval(loadCoverage, 1500);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [location.docId]);
+
   const currentId = section?.bookgraph.id ?? location.sectionId;
   const tree = useMemo(() => outline?.nodes ?? [], [outline]);
+  const currentIndex = tree.findIndex((node) => node.id === currentId);
+  const insideCoverage = isSectionInsideCoverage(coverageState.coverage, currentIndex);
+  const atCoverageBoundary = mode === "bilingual" && insideCoverage && Boolean(section?.bookgraph.next_id)
+    && !isSectionInsideCoverage(coverageState.coverage, currentIndex + 1);
   const go = (sectionId: string | null) => { if (sectionId) navigate(location.docId, sectionId, mode); setSidebarOpen(false); };
   const changeMode = (nextMode: ReadingMode) => { setMode(nextMode); navigate(location.docId, location.sectionId, nextMode); };
+  const startCoverage = (percent: 5 | 10 | 25 | 100) => {
+    setTranslationAction("starting");
+    void startTranslationCoverage(location.docId, TRANSLATION_LANGUAGE, percent)
+      .then((coverage) => setCoverageState({ status: "ready", coverage, error: null }))
+      .catch((reason: unknown) => setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" }))
+      .finally(() => setTranslationAction("idle"));
+  };
+  const translateNext = () => {
+    if (!section?.bookgraph.next_id) return;
+    setTranslationAction("next");
+    void translateNextSection(location.docId, TRANSLATION_LANGUAGE, section.bookgraph.id)
+      .then((coverage) => {
+        setCoverageState({ status: "ready", coverage, error: null });
+        const waitForTranslation = () => void Promise.all([
+          getTranslationCoverage(location.docId, TRANSLATION_LANGUAGE),
+          getSectionTranslation(location.docId, section.bookgraph.next_id!, TRANSLATION_LANGUAGE),
+        ]).then(([nextCoverage, nextTranslation]) => {
+          setCoverageState({ status: "ready", coverage: nextCoverage, error: null });
+          if (nextTranslation.status === "fresh" && Boolean(nextTranslation.content)) {
+            setTranslationAction("idle");
+            go(section.bookgraph.next_id);
+          } else if (nextCoverage.status === "failed") {
+            setTranslationAction("idle");
+          } else {
+            window.setTimeout(waitForTranslation, 1200);
+          }
+        }).catch((reason: unknown) => {
+          setTranslationAction("idle");
+          setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" });
+        });
+        window.setTimeout(waitForTranslation, 1200);
+      })
+      .catch((reason: unknown) => {
+        setTranslationAction("idle");
+        setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" });
+      });
+  };
   const onMarkRead = () => {
     if (!section) return;
     setMarkState({ status: "saving", message: null });
@@ -141,15 +205,18 @@ export function App() {
         {tree.map((node) => <button key={node.id} className={`toc-item level-${Math.min(node.level, 4)} ${node.id === currentId ? "active" : ""}`} onClick={() => go(node.id)}>{node.title}</button>)}
       </aside>
       {sidebarOpen && <button className="backdrop" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
-      <main className="reader-main">
+      <main className={`reader-main ${mode === "bilingual" ? "reader-main-bilingual" : ""}`}>
         {error ? <State title="Unable to open reader" message={error} /> : !section ? <State title="Loading section" message="Reading immutable BookGraph content…" /> : <article>
           <nav className="breadcrumbs">{section.bookgraph.heading_path.join(" / ")}</nav>
           <h1>{section.title}</h1>
           {section.description && <p className="description">{section.description}</p>}
-          {mode === "translation" ? <TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} /> : mode === "bilingual" ? <div className="bilingual"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">{TRANSLATION_LANGUAGE}</div><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} /></section></div> : <MarkdownArticle source={section.body} />}
+          {mode === "translation" ? <TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} /> : mode === "bilingual" ? <>
+            {!insideCoverage && <CoveragePanel state={coverageState} action={translationAction} onStart={startCoverage} />}
+            <div className="bilingual"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">{TRANSLATION_LANGUAGE}</div><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} /></section></div>
+          </> : <MarkdownArticle source={section.body} />}
           <nav className="section-navigation" aria-label="Section navigation">
-            <button disabled={!section.bookgraph.prev_id} onClick={() => go(section.bookgraph.prev_id)}><ChevronLeft size={18} /> Previous</button>
-            <button disabled={!section.bookgraph.next_id} onClick={() => go(section.bookgraph.next_id)}>Next <ChevronRight size={18} /></button>
+            <button disabled={!section.bookgraph.prev_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.prev_id)}><ChevronLeft size={18} /> Previous</button>
+            {atCoverageBoundary ? <button disabled={translationAction !== "idle"} onClick={translateNext}>{translationAction === "next" ? "Translating next section…" : "Translate next section"} <ChevronRight size={18} /></button> : <button disabled={!section.bookgraph.next_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.next_id)}>Next <ChevronRight size={18} /></button>}
           </nav>
         </article>}
       </main>
