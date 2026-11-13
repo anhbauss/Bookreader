@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-2-probability-theory",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-2-probability-theory.md",
+  "source_section_hash": "sha256:4c460a4d62a839157234bdd6f0be94f4cde7e5fefce43b334acba13ed4701d82",
+  "content_hash": "sha256:42e691c80572bdf85d559123c0293e26e371872f62cdd8784dca429fe3c650bb",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:07:57.126619+00:00",
+  "notes": null,
+  "alignment": null
+}

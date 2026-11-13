@@ -8,6 +8,7 @@ mutated outside their existing writers.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import stat
@@ -27,6 +28,7 @@ from bookgraph.translation_provider import TranslationProviderConfig, configured
 from bookgraph.workspace import WorkspacePaths
 
 CoverageStatus = Literal["missing", "queued", "running", "ready", "failed"]
+_LOGGER = logging.getLogger(__name__)
 
 
 class TranslationCoverageRecord(BaseModel):
@@ -255,10 +257,12 @@ def _run_requested_translations(
                 includes_assets=_section_has_asset_markdown(section.text),
                 model=model,
             )
-        except (ReadingServiceError, StopIteration):
+        except (ReadingServiceError, StopIteration) as exc:
+            _LOGGER.warning("Translation of %s failed: %s", section_id, exc)
             _record_failure(path, section_id, "Translation failed validation or provider request.")
             return
         except Exception:  # pragma: no cover - final guard for background worker isolation
+            _LOGGER.exception("Translation of %s failed unexpectedly", section_id)
             _record_failure(path, section_id, "Translation worker failed unexpectedly.")
             return
         with _record_lock(path):

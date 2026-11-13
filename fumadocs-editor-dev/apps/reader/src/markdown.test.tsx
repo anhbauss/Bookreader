@@ -1,8 +1,17 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { MarkdownArticle } from "./markdown";
+import { MarkdownArticle, resolveBookGraphImageLinks } from "./markdown";
 
 describe("MarkdownArticle math rendering", () => {
+  it("rewrites workspace image links through the BookGraph assets API", () => {
+    expect(
+      resolveBookGraphImageLinks(
+        "![Figure](images/figure one.jpg)",
+        "signals",
+      ),
+    ).toBe("![Figure](/api/assets/signals/figure%20one.jpg)");
+  });
+
   it("typesets inline LaTeX with KaTeX", () => {
     const html = renderToStaticMarkup(<MarkdownArticle source="The value is $\\frac{1}{2}$." />);
 

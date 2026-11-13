@@ -1,5 +1,5 @@
 import { Languages, LoaderCircle, TriangleAlert } from "lucide-react";
-import { MarkdownArticle } from "./markdown";
+import { MarkdownArticle, resolveBookGraphImageLinks } from "./markdown";
 import type { ReadingMode, TranslationCoverageState, TranslationState } from "./translation";
 import { canShowTranslation, translationNotice, translationWarning } from "./translation";
 
@@ -57,9 +57,11 @@ export function CoveragePanel({
 export function TranslationContent({
   state,
   language,
+  docId,
 }: {
   state: TranslationState;
   language: string;
+  docId: string;
 }) {
   const notice = translationNotice(state);
   if (notice) return <p className="translation-notice">{state.status === "loading" && <LoaderCircle className="spin" size={15} />}{notice}</p>;
@@ -67,6 +69,6 @@ export function TranslationContent({
   const warning = translationWarning(state);
   return <section className="translation-content" aria-label={`${language} translation`}>
     {warning && <p className="translation-warning"><TriangleAlert size={15} />{warning}</p>}
-    <MarkdownArticle source={state.translation!.content!} />
+    <MarkdownArticle source={resolveBookGraphImageLinks(state.translation!.content!, docId)} />
   </section>;
 }

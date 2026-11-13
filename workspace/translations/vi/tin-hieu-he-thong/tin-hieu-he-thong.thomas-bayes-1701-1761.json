@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.thomas-bayes-1701-1761",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.thomas-bayes-1701-1761.md",
+  "source_section_hash": "sha256:24e8aac032a37561deb7663cf586c4c30997ac9c1262297ee132e0a6f2a91a45",
+  "content_hash": "sha256:4b33979b0483a86b9abe06461eb05a4f2e2f77d41d8ae08f3e73f97fe0d06cf0",
+  "includes_assets": false,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:27:07.854567+00:00",
+  "notes": null,
+  "alignment": null
+}

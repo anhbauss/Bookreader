@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-2-1-probability-densities",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-2-1-probability-densities.md",
+  "source_section_hash": "sha256:c5033a5ecf925a8423f884a9e7962bc65fbbda47ffddb10a37d2b67435574ac6",
+  "content_hash": "sha256:3a2b20ee9cea8bf0e4e74ed744010ab774253f483fe187632a2927b1a72f61c3",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:26:29.207585+00:00",
+  "notes": null,
+  "alignment": null
+}

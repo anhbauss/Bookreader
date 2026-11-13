@@ -55,6 +55,16 @@ export function prepareMarkdownForRendering(source: string): string {
   return promoteEmbeddedMathEnvironments(source);
 }
 
+/** Translate BookGraph workspace-relative asset links into browser-safe API URLs. */
+export function resolveBookGraphImageLinks(source: string, docId: string): string {
+  const safeDocId = encodeURIComponent(docId);
+  return source.replace(
+    /(!\[[^\]]*\]\()\.?(?:\/)?images\/([^\s/)\\]+)(?=(?:\s+[^)]*)?\))/g,
+    (_match, prefix: string, basename: string) =>
+      `${prefix}/api/assets/${safeDocId}/${encodeURIComponent(basename)}`,
+  );
+}
+
 function isRawMath(text: string): boolean {
   const value = normalizeMathSource(text).trim();
   const hasMathSyntax = /(?:\\[A-Za-z]+|[_^]\s*\{|[=≤≥∑∫∞→⇔])/u.test(value);

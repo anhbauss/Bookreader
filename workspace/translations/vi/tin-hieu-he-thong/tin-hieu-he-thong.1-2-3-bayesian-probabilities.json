@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-2-3-bayesian-probabilities",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-2-3-bayesian-probabilities.md",
+  "source_section_hash": "sha256:4d472ac0cca8c9ea42e2b2b995dad36892cbe6524a3241e29ae5f0142e274a9e",
+  "content_hash": "sha256:ec217f2eca356923e476c566fb85b02f4694cf1ee7e56bd07f0898a6d6d2bae6",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:26:39.588999+00:00",
+  "notes": null,
+  "alignment": null
+}

@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.pattern-recognition-and-machine-learning",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.pattern-recognition-and-machine-learning.md",
+  "source_section_hash": "sha256:cdb36f0555c389a9c1413bfb5520362eebf997aeb45cb93eb6c17c0a8ce5cf72",
+  "content_hash": "sha256:71124bfe2eedcd2ebb58fd6e334b9e2fa7984f4900cafbdb6db024596cbb78f0",
+  "includes_assets": false,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:03:02.116282+00:00",
+  "notes": null,
+  "alignment": null
+}

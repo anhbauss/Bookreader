@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.information-science-and-statistics-front-matter",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.information-science-and-statistics-front-matter.md",
+  "source_section_hash": "sha256:2801f07524c6b4a3113b9fc250e476209ed8dddad79ea2104fbd16495b6db6bb",
+  "content_hash": "sha256:a0ae464c92b13cf6de19dfaea58298a7fc411457a8fcd71e0937791fe95967d6",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:02:34.861756+00:00",
+  "notes": null,
+  "alignment": null
+}

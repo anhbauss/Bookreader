@@ -1,0 +1,5 @@
+[translation]
+provider = "openai-compatible"
+base_url = "http://100.71.207.12:20128/v1"
+model = "translator"
+timeout_seconds = 120

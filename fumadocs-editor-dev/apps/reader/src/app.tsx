@@ -210,9 +210,9 @@ export function App() {
           <nav className="breadcrumbs">{section.bookgraph.heading_path.join(" / ")}</nav>
           <h1>{section.title}</h1>
           {section.description && <p className="description">{section.description}</p>}
-          {mode === "translation" ? <TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} /> : mode === "bilingual" ? <>
-            {!insideCoverage && <CoveragePanel state={coverageState} action={translationAction} onStart={startCoverage} />}
-            <div className="bilingual"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">{TRANSLATION_LANGUAGE}</div><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} /></section></div>
+          {mode === "translation" ? <TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} /> : mode === "bilingual" ? <>
+            <CoveragePanel state={coverageState} action={translationAction} onStart={startCoverage} />
+            <div className="bilingual"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">{TRANSLATION_LANGUAGE}</div><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} /></section></div>
           </> : <MarkdownArticle source={section.body} />}
           <nav className="section-navigation" aria-label="Section navigation">
             <button disabled={!section.bookgraph.prev_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.prev_id)}><ChevronLeft size={18} /> Previous</button>

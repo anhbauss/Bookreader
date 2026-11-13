@@ -1,0 +1,30 @@
+{
+  "doc_id": "tin-hieu-he-thong",
+  "lang": "vi",
+  "requested_percent": 5,
+  "target_section_ids": [
+    "tin-hieu-he-thong.information-science-and-statistics-front-matter",
+    "tin-hieu-he-thong.information-science-and-statistics",
+    "tin-hieu-he-thong.pattern-recognition-and-machine-learning",
+    "tin-hieu-he-thong.this-book-is-dedicated-to-myfamily",
+    "tin-hieu-he-thong.preface",
+    "tin-hieu-he-thong.exercises",
+    "tin-hieu-he-thong.acknowledgements",
+    "tin-hieu-he-thong.mathematical-notation",
+    "tin-hieu-he-thong.contents",
+    "tin-hieu-he-thong.introduction",
+    "tin-hieu-he-thong.1-1-example-polynomial-curve-fitting",
+    "tin-hieu-he-thong.1-2-probability-theory",
+    "tin-hieu-he-thong.1-2-1-probability-densities",
+    "tin-hieu-he-thong.1-2-2-expectations-and-covariances",
+    "tin-hieu-he-thong.1-2-3-bayesian-probabilities",
+    "tin-hieu-he-thong.thomas-bayes-1701-1761",
+    "tin-hieu-he-thong.1-2-4-the-gaussian-distribution",
+    "tin-hieu-he-thong.pierre-simon-laplace-1749-1827"
+  ],
+  "failed_sections": {
+    "tin-hieu-he-thong.1-2-1-probability-densities": "Translation failed validation or provider request."
+  },
+  "current_section_id": null,
+  "updated_at": "2026-11-13T13:08:08.514678+00:00"
+}

@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-2-6-bayesian-curve-fitting",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-2-6-bayesian-curve-fitting.md",
+  "source_section_hash": "sha256:34a40a67afd1f84bacdc9fb1cc46ef4c236ed4884d9ee71385c6024621508ffd",
+  "content_hash": "sha256:f907863bdc6757c34b00b483f80cfb2857f8aaf50e5d22234c0c53c16f827056",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:33:34.193872+00:00",
+  "notes": null,
+  "alignment": null
+}

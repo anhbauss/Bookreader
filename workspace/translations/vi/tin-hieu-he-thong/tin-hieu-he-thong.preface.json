@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.preface",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.preface.md",
+  "source_section_hash": "sha256:ff742a136a128d3bb301e19a54c7edf3c320dd7c709b79c8ca9c8e3d8ee84d1f",
+  "content_hash": "sha256:c41ba3450b008ddc5c34eb28993702def7dafc6599812b72a1691945ff482434",
+  "includes_assets": false,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:03:27.952927+00:00",
+  "notes": null,
+  "alignment": null
+}

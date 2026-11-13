@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-1-example-polynomial-curve-fitting",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-1-example-polynomial-curve-fitting.md",
+  "source_section_hash": "sha256:7b9569934fc6ce9ce12f5a4fea8f11eb0c8bede76da187ac57dd92a14db3fa02",
+  "content_hash": "sha256:33d00fd156090711bd1966a0328e1ab0d0c734233d59cd153fa3c6512a2a5c42",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:07:00.199300+00:00",
+  "notes": null,
+  "alignment": null
+}

@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-2-4-the-gaussian-distribution",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-2-4-the-gaussian-distribution.md",
+  "source_section_hash": "sha256:bbac980d2663914549f784e4b21ddb00c36376ae66f211495ad15c735e56724d",
+  "content_hash": "sha256:81c391d1d1ba60b184d214157b8e92389e2bf810ccd342261f278eeb72378c0f",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:27:12.968826+00:00",
+  "notes": null,
+  "alignment": null
+}

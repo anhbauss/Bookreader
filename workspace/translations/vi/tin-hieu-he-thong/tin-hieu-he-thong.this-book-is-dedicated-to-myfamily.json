@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.this-book-is-dedicated-to-myfamily",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.this-book-is-dedicated-to-myfamily.md",
+  "source_section_hash": "sha256:65ca31a9d1890ece20eb591703521694f909b2386ed0c6bcb0bac75c5e68049e",
+  "content_hash": "sha256:3c00bae65cf92cd05d64869a7de2cbecbd618a2243fb995cbfc310a5d6eb7d0a",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:03:17.493407+00:00",
+  "notes": null,
+  "alignment": null
+}

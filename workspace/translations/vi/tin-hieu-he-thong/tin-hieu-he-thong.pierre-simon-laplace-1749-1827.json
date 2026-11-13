@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.pierre-simon-laplace-1749-1827",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.pierre-simon-laplace-1749-1827.md",
+  "source_section_hash": "sha256:24c45e93f42e026fddf58a720fa6147e55496d032f6e9b61eeb6a50b5f2a5011",
+  "content_hash": "sha256:28ed84da61f284bb40c5e22035873c9972ba316e5452d5fdfcfbf8004b54c282",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:27:45.938910+00:00",
+  "notes": null,
+  "alignment": null
+}

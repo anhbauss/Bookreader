@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-2-5-curve-fitting-re-visited",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-2-5-curve-fitting-re-visited.md",
+  "source_section_hash": "sha256:c7c62951d4b53ca41e6a2d94551f43d00012584a9f503bedd9c59a1bded4a75a",
+  "content_hash": "sha256:913ca2cf45ab9e3d0e8230f275e8984544af374f7bdf4e1144b529c8afb357dd",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T13:32:48.407712+00:00",
+  "notes": null,
+  "alignment": null
+}

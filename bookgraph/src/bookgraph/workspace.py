@@ -182,7 +182,7 @@ backend = "llmwiki"
 [translation]
 # Use an OpenAI-compatible routing endpoint. The secret key is supplied only as
 # BOOKGRAPH_TRANSLATION_API_KEY to the BookGraph server process.
-# provider = "openai-compatible"
+# provider = "openai-compatible" # or "anthropic-compatible"
 # base_url = "https://router.example/v1"
 # model = "provider/model"
 # timeout_seconds = 120
