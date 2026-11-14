@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-5-1-minimizing-the-misclassification-rate",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-5-1-minimizing-the-misclassification-rate.md",
+  "source_section_hash": "sha256:ba6c262bf57c1349b54c51143a47a8cf4b5c7d55737eae27227ad071ec325120",
+  "content_hash": "sha256:0f86b02aec7b4e89a84f6fb35823f34784ae76806734807927c1c1ee1086911a",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-13T14:50:51.510976+00:00",
+  "notes": null,
+  "alignment": null
+}

@@ -1,4 +1,4 @@
-import { BookOpen, ChevronLeft, ChevronRight, Menu, X } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   getReadingProgress,
@@ -6,6 +6,7 @@ import {
   getSectionTranslation,
   getTranslationCoverage,
   markSectionRead,
+  retrySectionTranslation,
   startTranslationCoverage,
   translateNextSection,
   type SectionContext,
@@ -16,7 +17,9 @@ import { MemoryPanel, ProgressPanel } from "./reader-panels";
 import { planIdForDocument, progressFromMarkRead, type MarkReadState, type ReaderProgressState } from "./reading";
 import { canonicalSectionId, sectionUrl, validateReaderRoute } from "./reader";
 import { CoveragePanel, ReadingModePicker, TranslationContent } from "./translation-panel";
-import { isSectionInsideCoverage, resolveReadingMode, type ReadingMode, type TranslationCoverageState, type TranslationState } from "./translation";
+import { canShowTranslation, isSectionInsideCoverage, resolveReadingMode, type ReadingMode, type TranslationCoverageState, type TranslationState } from "./translation";
+import { LibraryPage } from "./library/library-page";
+import { ReaderDrawer, ReaderHeader, SearchModal, useReaderPreferences, VisualSettingsPopover } from "./reader-experience";
 import type { ReaderOutline, ReaderSection } from "./types";
 
 const TRANSLATION_LANGUAGE = import.meta.env.VITE_BOOKGRAPH_TRANSLATION_LANGUAGE?.trim() || "vi";
@@ -33,12 +36,19 @@ function navigate(docId: string, sectionId: string, mode?: ReadingMode) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
+/** Split content only at Markdown block boundaries so the two reading panes flow in order. */
+function splitSequentialPages(source: string): [string, string] {
+  const blocks = source.trim().split(/\n{2,}/).filter(Boolean);
+  const midpoint = Math.ceil(blocks.length / 2);
+  return [blocks.slice(0, midpoint).join("\n\n"), blocks.slice(midpoint).join("\n\n")];
+}
+
 export function App() {
+  if (!window.location.search) return <LibraryPage />;
   const [location, setLocation] = useState(route);
   const [section, setSection] = useState<ReaderSection | null>(null);
   const [outline, setOutline] = useState<ReaderOutline | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [context, setContext] = useState<SectionContext | null>(null);
   const [contextStatus, setContextStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [contextError, setContextError] = useState<string | null>(null);
@@ -48,6 +58,22 @@ export function App() {
   const [translationState, setTranslationState] = useState<TranslationState>({ status: "idle", translation: null, error: null });
   const [coverageState, setCoverageState] = useState<TranslationCoverageState>({ status: "idle", coverage: null, error: null });
   const [translationAction, setTranslationAction] = useState<"idle" | "starting" | "next">("idle");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [bookmarked, setBookmarked] = useState(false);
+  const preferences = useReaderPreferences();
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const closeSettingsWhenOutside = (event: MouseEvent) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest(".visual-settings") || event.target.closest('button[aria-label="Open visual settings"]')) return;
+      setSettingsOpen(false);
+    };
+    window.addEventListener("mousedown", closeSettingsWhenOutside);
+    return () => window.removeEventListener("mousedown", closeSettingsWhenOutside);
+  }, [settingsOpen]);
 
   useEffect(() => {
     const updateLocation = () => {
@@ -139,10 +165,11 @@ export function App() {
   const currentId = section?.bookgraph.id ?? location.sectionId;
   const tree = useMemo(() => outline?.nodes ?? [], [outline]);
   const currentIndex = tree.findIndex((node) => node.id === currentId);
-  const insideCoverage = isSectionInsideCoverage(coverageState.coverage, currentIndex);
-  const atCoverageBoundary = mode === "bilingual" && insideCoverage && Boolean(section?.bookgraph.next_id)
-    && !isSectionInsideCoverage(coverageState.coverage, currentIndex + 1);
-  const go = (sectionId: string | null) => { if (sectionId) navigate(location.docId, sectionId, mode); setSidebarOpen(false); };
+  const nextSectionId = section?.bookgraph.next_id ?? null;
+  const currentTranslationVisible = mode === "bilingual" && canShowTranslation(translationState);
+  const showTranslationAction = mode === "bilingual" && !currentTranslationVisible
+    && (translationState.status === "ready" || translationState.status === "error");
+  const go = (sectionId: string | null) => { if (sectionId) navigate(location.docId, sectionId, mode); };
   const changeMode = (nextMode: ReadingMode) => { setMode(nextMode); navigate(location.docId, location.sectionId, nextMode); };
   const startCoverage = (percent: 5 | 10 | 25 | 100) => {
     setTranslationAction("starting");
@@ -181,6 +208,32 @@ export function App() {
         setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" });
       });
   };
+  const requestCurrentTranslation = () => {
+    if (!section) return;
+    setTranslationAction("next");
+    void retrySectionTranslation(location.docId, TRANSLATION_LANGUAGE, section.bookgraph.id)
+      .then((coverage) => {
+        setCoverageState({ status: "ready", coverage, error: null });
+        const waitForTranslation = () => void getSectionTranslation(
+          location.docId, section.bookgraph.id, TRANSLATION_LANGUAGE,
+        ).then((translation) => {
+          if (translation.status === "fresh" && Boolean(translation.content)) {
+            setTranslationState({ status: "ready", translation, error: null });
+            setTranslationAction("idle");
+          } else {
+            window.setTimeout(waitForTranslation, 1200);
+          }
+        }).catch((reason: unknown) => {
+          setTranslationAction("idle");
+          setTranslationState({ status: "error", translation: null, error: reason instanceof Error ? reason.message : "Unknown error" });
+        });
+        window.setTimeout(waitForTranslation, 1200);
+      })
+      .catch((reason: unknown) => {
+        setTranslationAction("idle");
+        setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" });
+      });
+  };
   const onMarkRead = () => {
     if (!section) return;
     setMarkState({ status: "saving", message: null });
@@ -192,31 +245,37 @@ export function App() {
       .catch((reason: unknown) => setMarkState({ status: "error", message: reason instanceof Error ? reason.message : "Unknown error" }));
   };
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setSearchOpen(false); setSettingsOpen(false); setDrawerOpen(false); }
+      if (preferences.vertical || searchOpen || settingsOpen || drawerOpen || (event.target instanceof HTMLInputElement)) return;
+      if (event.key === "ArrowLeft") go(section?.bookgraph.prev_id ?? null);
+      if (event.key === "ArrowRight") go(section?.bookgraph.next_id ?? null);
+    };
+    window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown);
+  }, [preferences.vertical, searchOpen, settingsOpen, drawerOpen, section]);
+
+  const readerSource = section?.body ?? "";
+  const [firstPage, secondPage] = useMemo(() => splitSequentialPages(readerSource), [readerSource]);
   return (
-    <div className="reader-shell">
-      <header className="reader-header">
-        <button className="icon-button mobile-only" aria-label="Open table of contents" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
-        <a className="brand" href="/"><BookOpen size={20} /><span>Book Reader</span></a>
-        <ReadingModePicker mode={mode} onChange={changeMode} />
-        <span className="read-only-pill">Read-only</span>
-      </header>
-      <aside className={`toc ${sidebarOpen ? "open" : ""}`} aria-label="Table of contents">
-        <div className="toc-heading"><span>Contents</span><button className="icon-button mobile-only" aria-label="Close table of contents" onClick={() => setSidebarOpen(false)}><X size={20} /></button></div>
-        {tree.map((node) => <button key={node.id} className={`toc-item level-${Math.min(node.level, 4)} ${node.id === currentId ? "active" : ""}`} onClick={() => go(node.id)}>{node.title}</button>)}
-      </aside>
-      {sidebarOpen && <button className="backdrop" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
-      <main className={`reader-main ${mode === "bilingual" ? "reader-main-bilingual" : ""}`}>
+    <div className={`reader-shell reader-experience reader-font-${preferences.font} reader-size-${preferences.size} ${mode === "bilingual" || preferences.vertical ? "reader-bilingual" : ""}`} data-reader-theme={preferences.theme}>
+      <ReaderHeader title={section?.title ?? location.docId ?? "Book Reader"} author="Alan V. Oppenheim" onSearch={() => setSearchOpen(true)} onSettings={() => setSettingsOpen((value) => !value)} onPanel={() => setDrawerOpen(true)} onBookmark={() => setBookmarked((value) => !value)} bookmarked={bookmarked} />
+      {settingsOpen && <div className="visual-settings-anchor"><VisualSettingsPopover theme={preferences.theme} font={preferences.font} size={preferences.size} vertical={preferences.vertical} onTheme={preferences.setTheme} onFont={preferences.setFont} onSize={preferences.setSize} onVertical={preferences.setVertical} /></div>}
+      {searchOpen && <SearchModal source={readerSource} onClose={() => setSearchOpen(false)} onResult={(id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" })} />}
+      <ReaderDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} mode={mode} onMode={changeMode}><aside className="toc" aria-label="Table of contents"><div className="toc-heading"><span>Contents</span></div>{tree.map((node) => <button key={node.id} className={`toc-item level-${Math.min(node.level, 4)} ${node.id === currentId ? "active" : ""}`} onClick={() => go(node.id)}>{node.title}</button>)}</aside></ReaderDrawer>
+      <main className={`reader-main reader-reading-area ${mode === "bilingual" || preferences.vertical ? "reader-main-bilingual" : ""}`}>
         {error ? <State title="Unable to open reader" message={error} /> : !section ? <State title="Loading section" message="Reading immutable BookGraph content…" /> : <article>
-          <nav className="breadcrumbs">{section.bookgraph.heading_path.join(" / ")}</nav>
+          <p className="reader-chapter-label">{section.bookgraph.heading_path.join(" / ")}</p>
           <h1>{section.title}</h1>
           {section.description && <p className="description">{section.description}</p>}
-          {mode === "translation" ? <TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} /> : mode === "bilingual" ? <>
+          {mode === "translation" ? preferences.vertical ? <div className="bilingual vertical-split"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">{TRANSLATION_LANGUAGE}</div><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} /></section></div> : <TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} className="reader-prose reader-paged-prose" /> : mode === "bilingual" ? <>
             <CoveragePanel state={coverageState} action={translationAction} onStart={startCoverage} />
+            {showTranslationAction && <section className="translation-retry" aria-label="Translate this section"><div><strong>Translation unavailable</strong><span>This section has no usable Vietnamese translation yet.</span></div><button type="button" disabled={translationAction !== "idle"} onClick={requestCurrentTranslation}>{translationAction === "next" ? "Translating…" : "Translate this section"}</button></section>}
             <div className="bilingual"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">{TRANSLATION_LANGUAGE}</div><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} /></section></div>
-          </> : <MarkdownArticle source={section.body} />}
-          <nav className="section-navigation" aria-label="Section navigation">
-            <button disabled={!section.bookgraph.prev_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.prev_id)}><ChevronLeft size={18} /> Previous</button>
-            {atCoverageBoundary ? <button disabled={translationAction !== "idle"} onClick={translateNext}>{translationAction === "next" ? "Translating next section…" : "Translate next section"} <ChevronRight size={18} /></button> : <button disabled={!section.bookgraph.next_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.next_id)}>Next <ChevronRight size={18} /></button>}
+          </> : preferences.vertical ? <div className="bilingual vertical-split"><section><MarkdownArticle source={firstPage} /></section><section><MarkdownArticle source={secondPage} /></section></div> : <MarkdownArticle source={section.body} className="reader-prose reader-paged-prose" />}
+          <nav className="section-navigation reader-pagination" aria-label="Section navigation">
+            <button disabled={!section.bookgraph.prev_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.prev_id)}><ChevronLeft size={18} /> Previous Page</button>
+            <button disabled={!section.bookgraph.next_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.next_id)}>Next Page <ChevronRight size={18} /></button>
           </nav>
         </article>}
       </main>

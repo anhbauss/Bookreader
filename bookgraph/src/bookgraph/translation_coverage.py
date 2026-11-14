@@ -24,6 +24,7 @@ from bookgraph.mcp.errors import ReadingServiceError
 from bookgraph.mcp.loading import _load_doc_sections, _validate_id
 from bookgraph.mcp.translation_tools import get_section_translation, write_section_translation
 from bookgraph.models import Section
+from bookgraph.translations import translation_paths
 from bookgraph.translation_provider import TranslationProviderConfig, configured_provider
 from bookgraph.workspace import WorkspacePaths
 
@@ -147,6 +148,53 @@ def request_translation_coverage(
             updated_at=_now(),
         )
         _write_record(record, path)
+    return get_translation_coverage(workspace, resolved_doc_id, lang)
+
+
+def retry_translation_section(
+    workspace: WorkspacePaths, doc_id: str, lang: str, section_id: str
+) -> TranslationCoverageView:
+    """Retry one section, deleting its prior cache and (re)queuing it for translation."""
+
+    resolved_doc_id = _validate_id(doc_id, "doc_id")
+    resolved_section_id = _validate_id(section_id, "section_id")
+    sections = _load_doc_sections(workspace, resolved_doc_id)
+    ids = [section.id for section in sections]
+    if resolved_section_id not in ids:
+        raise ReadingServiceError("section is not part of this document")
+    # Remove the prior translation body and sidecar so a later status lookup is not
+    # fooled into treating a stale/failed artifact as still fresh.
+    cached = translation_paths(workspace, lang, resolved_doc_id, resolved_section_id)
+    cached.body.unlink(missing_ok=True)
+    cached.metadata.unlink(missing_ok=True)
+    path = _record_path(workspace, resolved_doc_id, lang)
+    with _record_lock(path):
+        old = _read_record(path)
+        if old is None:
+            old = TranslationCoverageRecord(
+                doc_id=resolved_doc_id,
+                lang=lang,
+                requested_percent=0,
+                target_section_ids=ids,
+                failed_sections={},
+            )
+        # Ensure the section is part of the target set so the worker picks it up even
+        # when it was not previously covered (e.g. a failed run left it out).
+        target = list(old.target_section_ids)
+        if resolved_section_id not in target:
+            target.insert(min(ids.index(resolved_section_id), len(target)), resolved_section_id)
+        failures = dict(old.failed_sections)
+        failures.pop(resolved_section_id, None)
+        _write_record(
+            old.model_copy(
+                update={
+                    "target_section_ids": target,
+                    "failed_sections": failures,
+                    "updated_at": _now(),
+                }
+            ),
+            path,
+        )
     return get_translation_coverage(workspace, resolved_doc_id, lang)
 
 

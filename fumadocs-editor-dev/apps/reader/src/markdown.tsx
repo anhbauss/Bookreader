@@ -1,23 +1,60 @@
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import katex from "katex";
 
 function Math({ expression, display = false }: { expression: string; display?: boolean }) {
+  let markup: string;
   try {
-    return (
-      <span
-        className={display ? "math-display" : "math-inline"}
-        dangerouslySetInnerHTML={{
-          __html: katex.renderToString(normalizeMathSource(expression), {
-            displayMode: display,
-            throwOnError: false,
-            strict: "ignore",
-          }),
-        }}
-      />
-    );
+    markup = katex.renderToString(normalizeMathSource(expression), {
+      displayMode: display,
+      throwOnError: false,
+      strict: "ignore",
+    });
   } catch {
     return <code className="math-error">{expression}</code>;
   }
+
+  if (!display) {
+    return <span className="math-inline" dangerouslySetInnerHTML={{ __html: markup }} />;
+  }
+  return <DisplayMath markup={markup} />;
+}
+
+function DisplayMath({ markup }: { markup: string }) {
+  const viewport = useRef<HTMLDivElement>(null);
+  const [scrollState, setScrollState] = useState({ overflow: false, atStart: true, atEnd: true });
+
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element) return;
+    const updateScrollState = () => {
+      const maxScroll = element.scrollWidth - element.clientWidth;
+      setScrollState({
+        overflow: maxScroll > 1,
+        atStart: element.scrollLeft <= 1,
+        atEnd: element.scrollLeft >= maxScroll - 1,
+      });
+    };
+    updateScrollState();
+    element.addEventListener("scroll", updateScrollState, { passive: true });
+    const observer = new ResizeObserver(updateScrollState);
+    observer.observe(element);
+    return () => {
+      element.removeEventListener("scroll", updateScrollState);
+      observer.disconnect();
+    };
+  }, [markup]);
+
+  const scrollFormula = (direction: -1 | 1) => {
+    viewport.current?.scrollBy({ left: direction * 120, behavior: "smooth" });
+  };
+
+  return (
+    <div className="math-display">
+      {scrollState.overflow && <button type="button" className="math-scroll-button math-scroll-previous" aria-label="Show earlier part of formula" disabled={scrollState.atStart} onClick={() => scrollFormula(-1)}>‹</button>}
+      <div ref={viewport} className="math-scroll-viewport" dangerouslySetInnerHTML={{ __html: markup }} />
+      {scrollState.overflow && <button type="button" className="math-scroll-button math-scroll-next" aria-label="Show later part of formula" disabled={scrollState.atEnd} onClick={() => scrollFormula(1)}>›</button>}
+    </div>
+  );
 }
 
 function normalizeMathSource(text: string): string {
@@ -59,9 +96,9 @@ export function prepareMarkdownForRendering(source: string): string {
 export function resolveBookGraphImageLinks(source: string, docId: string): string {
   const safeDocId = encodeURIComponent(docId);
   return source.replace(
-    /(!\[[^\]]*\]\()\.?(?:\/)?images\/([^\s/)\\]+)(?=(?:\s+[^)]*)?\))/g,
+    /(!\[[^\]]*\]\()\.?(?:\/)?images\/([^)]*?)(?=\))/g,
     (_match, prefix: string, basename: string) =>
-      `${prefix}/api/assets/${safeDocId}/${encodeURIComponent(basename)}`,
+      `${prefix}/api/assets/${safeDocId}/${encodeURIComponent(basename.trim())}`,
   );
 }
 
@@ -133,10 +170,10 @@ function inline(text: string, key: string) {
 }
 
 /** A deliberately small, non-executing Markdown renderer for reader content. */
-export function MarkdownArticle({ source }: { source: string }) {
+export function MarkdownArticle({ source, className = "" }: { source: string; className?: string }) {
   const blocks = prepareMarkdownForRendering(source).trim().split(/\n{2,}/);
   return (
-    <div className="markdown">
+    <div className={`markdown ${className}`.trim()}>
       {blocks.map((block, index) => {
         const lines = block.split("\n");
         const heading = /^(#{1,6})\s+(.+)$/.exec(lines[0]);

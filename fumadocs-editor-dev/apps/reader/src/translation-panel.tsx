@@ -43,13 +43,16 @@ export function CoveragePanel({
   if (coverage && coverage.status !== "missing") {
     const progress = `${coverage.ready_sections} / ${coverage.target_sections}`;
     const failed = coverage.failed_sections > 0 ? ` ${coverage.failed_sections} section(s) need retrying.` : "";
-    return <p className="translation-notice">Vietnamese bilingual coverage: {progress} sections ready.{failed}</p>;
+    return <section className="translation-status" aria-label="Vietnamese bilingual translation status">
+      <div><strong>Vietnamese translation</strong><span>{progress} sections ready.{failed}</span></div>
+      <small>{coverage.status === "running" ? "Translating in the background…" : "Use Translate & Next Page to extend the edition one section at a time."}</small>
+    </section>;
   }
   return <section className="coverage-panel" aria-label="Prepare bilingual translation">
-    <strong>Prepare Vietnamese bilingual reading</strong>
-    <p>Choose how much of this book to translate before reading. Additional sections can be translated from Next.</p>
+    <div className="coverage-heading"><strong>Prepare Vietnamese bilingual reading</strong><span>Choose a starting range</span></div>
+    <p>The translation runs in the background. You can extend it one section at a time with the next-page control.</p>
     <div className="coverage-options">
-      {([5, 10, 25, 100] as const).map((percent) => <button key={percent} disabled={action !== "idle"} onClick={() => onStart(percent)}>{action === "starting" ? "Preparing…" : `${percent}%`}</button>)}
+      {([5, 10, 25, 100] as const).map((percent) => <button key={percent} disabled={action !== "idle"} onClick={() => onStart(percent)}>{action === "starting" ? "Preparing…" : percent === 100 ? "Full book" : `${percent}%`}</button>)}
     </div>
   </section>;
 }
@@ -58,10 +61,12 @@ export function TranslationContent({
   state,
   language,
   docId,
+  className,
 }: {
   state: TranslationState;
   language: string;
   docId: string;
+  className?: string;
 }) {
   const notice = translationNotice(state);
   if (notice) return <p className="translation-notice">{state.status === "loading" && <LoaderCircle className="spin" size={15} />}{notice}</p>;
@@ -69,6 +74,6 @@ export function TranslationContent({
   const warning = translationWarning(state);
   return <section className="translation-content" aria-label={`${language} translation`}>
     {warning && <p className="translation-warning"><TriangleAlert size={15} />{warning}</p>}
-    <MarkdownArticle source={resolveBookGraphImageLinks(state.translation!.content!, docId)} />
+    <MarkdownArticle source={resolveBookGraphImageLinks(state.translation!.content!, docId)} className={className} />
   </section>;
 }

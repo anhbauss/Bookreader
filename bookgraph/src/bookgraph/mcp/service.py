@@ -83,6 +83,7 @@ from bookgraph.translation_coverage import (
     get_translation_coverage,
     request_next_translation,
     request_translation_coverage,
+    retry_translation_section,
     run_requested_translations,
 )
 
@@ -143,6 +144,7 @@ __all__ = [
     "mark_read",
     "request_next_translation",
     "request_translation_coverage",
+    "retry_translation_section",
     "run_requested_translations",
     "search_sections",
     "write_section_translation",

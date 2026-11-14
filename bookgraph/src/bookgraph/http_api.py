@@ -184,6 +184,23 @@ def create_app(workspace: WorkspacePaths) -> Any:
         except ReadingServiceError as exc:
             return _error(JSONResponse, 400, "service_error", str(exc))
 
+    async def retry_translation(request: Request) -> Any:
+        try:
+            payload = await request.json()
+            section_id = payload.get("section_id") if isinstance(payload, dict) else None
+            if not isinstance(section_id, str):
+                raise ReadingServiceError("Request body must contain section_id.")
+            view = service.retry_translation_section(
+                workspace,
+                request.path_params["doc_id"],
+                request.path_params["lang"],
+                section_id,
+            )
+            start_worker(request.path_params["doc_id"], request.path_params["lang"])
+            return JSONResponse(_public_view(view))
+        except ReadingServiceError as exc:
+            return _error(JSONResponse, 400, "service_error", str(exc))
+
     async def concept(request: Request) -> Any:
         return response(lambda: service.get_concept(workspace, request.path_params["concept"]))
 
@@ -240,6 +257,11 @@ def create_app(workspace: WorkspacePaths) -> Any:
         Route(
             "/api/documents/{doc_id:str}/translations/{lang:str}/next",
             translate_next,
+            methods=["POST"],
+        ),
+        Route(
+            "/api/documents/{doc_id:str}/translations/{lang:str}/retry",
+            retry_translation,
             methods=["POST"],
         ),
         Route("/api/concepts/{concept:str}", concept, methods=["GET"]),

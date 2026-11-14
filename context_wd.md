@@ -1,32 +1,17 @@
-# CONTEXT SUMMARY: BookGraph Progressive Translation Pipeline
-**Project:** BookGraph (Local-first bilingual reading workspace & MCP server)
-**Feature:** Progressive translation coverage (5%, 10%, 25%, 100%) and "Translate next section" boundary handling.
+Giai đoạn 1: Trích xuất thiết kế (UI Specs)
+Bạn yêu cầu Agent đọc các ảnh giao diện tham chiếu (chỉ xem bản thu nhỏ) để tạo file đặc tả thiết kế vào thư mục docs/ui-spec/. Do gặp lỗi môi trường (hermes is temporarily unavailable), Agent dừng lại giữa chừng, chỉ tạo được hai file library.md và reader.md, trong khi các file tokens.md và features-keep.md chưa được hoàn thiện do không thể chạy code lấy mã màu tự động.
 
-## 1. Backend Architecture (Python)
-- **Translation Provider (`src/bookgraph/translation_provider.py`)**: Implemented OpenAI-compatible REST API provider. Reads config from `bookgraph.toml` `[translation]` block.
-- **Security**: API Key strictly loaded from `BOOKGRAPH_TRANSLATION_API_KEY` env var. Never exposed to browser, config files, or coverage records.
-- **Coverage State (`src/bookgraph/translation_coverage.py`)**: 
-  - State file: `workspace/runs/translation-coverage/<doc_id>.<lang>.json`
-  - Tracks requested percent, target section IDs, current translating section, and failures.
-  - "Ready" status dynamically evaluated via BookGraph artifact freshness (`status=fresh`).
-- **HTTP API (`src/bookgraph/http_api.py`)**:
-  - `GET /api/documents/{doc_id}/translations/{lang}/coverage`
-  - `POST /api/documents/{doc_id}/translations/{lang}/coverage` (Payload: `{"percent": 5}`)
-  - `POST /api/documents/{doc_id}/translations/{lang}/next` (Payload: `{"current_section_id": "..."}`)
+Giai đoạn 2: Dựng giao diện trang Library
+Dựa trên file spec, Agent tiến hành lập trình các component cho trang thư viện. Cụ thể, Agent đã tạo mock-books.ts chứa dữ liệu 4 cuốn sách giả lập, xây dựng library-page.tsx (TopBar, Hero, BookCard) và file library.css chứa các biến màu cục bộ. Tuy code đã được ghép vào app.tsx, Agent không thể tự chạy kiểm tra (lint/build) vì lỗi môi trường vẫn tiếp diễn.
 
-## 2. Frontend / Reader UI (TypeScript / React)
-- **Polling**: Reader fetches coverage state every 1.5 seconds.
-- **UI States**: 
-  - Displays coverage selection panel (5 / 10 / 25 / 100%) in Bilingual mode if no coverage exists.
-  - Shows translation progress (e.g., "12 / 18 sections ready").
-- **Boundary Handling**: Swaps "Next" button with "Translate next section" when hitting the edge of the current translation coverage.
-- **Independence**: Original reading mode remains unblocked by translation status.
+Giai đoạn 3: Dựng giao diện trang Reader
+Agent tiếp tục phát triển trang đọc sách, bổ sung reader-experience.tsx và reader-experience.css. Các tính năng được triển khai bao gồm: Theme provider (Light/Dark/Paper), tuỳ chỉnh phông chữ/cỡ chữ, cuộn dọc/chia cột, và modal tìm kiếm có highlight từ khoá. Các menu chức năng phức tạp (mục lục, bản dịch) được đẩy vào Drawer để giữ UI mặc định tinh gọn, đồng thời thiết lập các phím tắt (Esc, mũi tên trái/phải).
 
-## 3. Current Status & Next Actions
-- **Backend Quality**: 100% Passed. Fixed circular import in `mcp/service.py` & `translation_coverage.py`. Fixed workspace path initialization in tests. Pytest, Ruff (targeted files), and Mypy all pass.
-- **Immediate Next Step**: 
-  1. Run Frontend validation in `fumadocs-editor-dev`: `corepack pnpm --filter book-reader test -- translation.test.ts`, `types:check`, and `build`.
-  2. Boot the HTTP server (`bookgraph serve-http`) with `export BOOKGRAPH_TRANSLATION_API_KEY='...'`.
-  3. Test the real API router via frontend with a 5% coverage run on a small document.
+Giai đoạn 4: Debug và Type-check
+Bạn chủ động chạy lệnh build (pnpm build && pnpm types:check). Lần đầu thất bại do bạn đang đứng ở thư mục gốc (~) thay vì monorepo. Sau khi chuyển vào thư mục fumadocs-editor-dev, trình biên dịch phát hiện lỗi TypeScript (thuộc tính title không tồn tại trên ReaderOutline). Agent đã sửa lại file app.tsx bằng cách dùng fallback location.docId, giúp quá trình type-check sau đó thành công hoàn toàn.
 
-  claude --resume 345ba5b9-48e9-4375-8397-a72347937196
+Giai đoạn 5: Chuyển hướng sang Artifact Prototype
+Vì hệ thống lỗi không cho phép chạy lệnh start app trực tiếp, bạn yêu cầu chuyển sang phương pháp tạo Artifact để dễ tinh chỉnh UI. Agent đã gom toàn bộ code thành một file book-reader-prototype.html độc lập. Tuy nhiên, do phiên làm việc đang xác thực bằng API key (ANTHROPIC_AUTH_TOKEN), hệ thống từ chối publish file này lên giao diện Artifact của nền tảng web. Agent hướng dẫn bạn dùng Python local server để xem file HTML này trực tiếp trên máy.
+
+Giai đoạn 6: Tinh chỉnh UI thẻ sách (Book Card)
+Dựa trên file ảnh tham khảo mới, bạn yêu cầu thêm nút menu "ba chấm" vào mỗi thẻ sách ở trang Library kèm 2 chức năng: "Complete" và "Delete". Agent đã bổ sung DOM, CSS, và viết thêm logic JavaScript vào file HTML prototype để menu hoạt động (đánh dấu mờ bìa sách khi chọn Complete, và xoá phần tử khỏi danh sách khi chọn Delete).

@@ -24,9 +24,20 @@
     "tin-hieu-he-thong.1-2-5-curve-fitting-re-visited",
     "tin-hieu-he-thong.1-2-6-bayesian-curve-fitting",
     "tin-hieu-he-thong.1-3-model-selection",
-    "tin-hieu-he-thong.1-4-the-curse-of-dimensionality"
+    "tin-hieu-he-thong.1-4-the-curse-of-dimensionality",
+    "tin-hieu-he-thong.1-5-decision-theory",
+    "tin-hieu-he-thong.1-5-1-minimizing-the-misclassification-rate",
+    "tin-hieu-he-thong.1-5-2-minimizing-the-expected-loss",
+    "tin-hieu-he-thong.1-5-3-the-reject-option",
+    "tin-hieu-he-thong.1-5-4-inference-and-decision",
+    "tin-hieu-he-thong.1-5-5-loss-functions-for-regression"
   ],
-  "failed_sections": {},
+  "failed_sections": {
+    "tin-hieu-he-thong.1-5-4-inference-and-decision": "Translation failed validation or provider request.",
+    "tin-hieu-he-thong.1-5-3-the-reject-option": "Translation failed validation or provider request.",
+    "tin-hieu-he-thong.1-5-2-minimizing-the-expected-loss": "Translation failed validation or provider request.",
+    "tin-hieu-he-thong.1-5-5-loss-functions-for-regression": "Translation failed validation or provider request."
+  },
   "current_section_id": null,
-  "updated_at": "2026-11-13T13:54:06.234949+00:00"
+  "updated_at": "2026-11-14T08:53:31.542142+00:00"
 }
