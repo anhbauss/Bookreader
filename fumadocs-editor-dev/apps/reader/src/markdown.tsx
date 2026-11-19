@@ -1,11 +1,13 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import katex from "katex";
 
-function Math({ expression, display = false }: { expression: string; display?: boolean }) {
+function Math({ expression, display = false, equationTag }: { expression: string; display?: boolean; equationTag?: string }) {
+  const normalized = normalizeMathSource(expression);
+  const shouldDisplay = display || Boolean(equationTag);
   let markup: string;
   try {
-    markup = katex.renderToString(normalizeMathSource(expression), {
-      displayMode: display,
+    markup = katex.renderToString(normalized, {
+      displayMode: shouldDisplay,
       throwOnError: false,
       strict: "ignore",
     });
@@ -13,13 +15,13 @@ function Math({ expression, display = false }: { expression: string; display?: b
     return <code className="math-error">{expression}</code>;
   }
 
-  if (!display) {
+  if (!shouldDisplay) {
     return <span className="math-inline" dangerouslySetInnerHTML={{ __html: markup }} />;
   }
-  return <DisplayMath markup={markup} />;
+  return <DisplayMath markup={markup} equationTag={equationTag} />;
 }
 
-function DisplayMath({ markup }: { markup: string }) {
+function DisplayMath({ markup, equationTag }: { markup: string; equationTag?: string }) {
   const viewport = useRef<HTMLDivElement>(null);
   const [scrollState, setScrollState] = useState({ overflow: false, atStart: true, atEnd: true });
 
@@ -52,9 +54,24 @@ function DisplayMath({ markup }: { markup: string }) {
     <div className="math-display">
       {scrollState.overflow && <button type="button" className="math-scroll-button math-scroll-previous" aria-label="Show earlier part of formula" disabled={scrollState.atStart} onClick={() => scrollFormula(-1)}>‹</button>}
       <div ref={viewport} className="math-scroll-viewport" dangerouslySetInnerHTML={{ __html: markup }} />
+      {equationTag && <span className="math-equation-tag" aria-label={`Equation ${equationTag}`}>({equationTag})</span>}
       {scrollState.overflow && <button type="button" className="math-scroll-button math-scroll-next" aria-label="Show later part of formula" disabled={scrollState.atEnd} onClick={() => scrollFormula(1)}>›</button>}
     </div>
   );
+}
+
+function extractEquationTag(text: string): { expression: string; equationTag?: string } {
+  // The generated reader content escapes ordinary TeX braces (`\\tag\\{2.32\\}`),
+  // while translation artifacts often do not (`\\tag{2.32}`). Normalize braces
+  // before extracting so both representations produce the same visible label.
+  const normalized = text.replace(/\\\{([^{}\n]*)\\\}/g, "{$1}");
+  const match = /\\tag\s*(?:\{([^{}\n]*)\}|\(([^()\n]*)\))/.exec(normalized);
+  if (!match) return { expression: normalized };
+  const equationTag = (match[1] ?? match[2] ?? "").trim();
+  return {
+    expression: normalized.slice(0, match.index) + normalized.slice(match.index + match[0].length),
+    equationTag: equationTag || undefined,
+  };
 }
 
 function normalizeMathSource(text: string): string {
@@ -65,7 +82,7 @@ function normalizeMathSource(text: string): string {
     .replace(/\\\{([^{}\n]*)\\\}/g, "{$1}")
     .replace(/\\left\s*\{/g, "\\left\\{")
     .replace(/\\right\s*\}/g, "\\right\\}")
-    .replace(/\\tag\s*(?:\\\{[^{}\n]*\\\}|\{[^{}\n]*\}|\([^()\n]*\))/g, "")
+    .replace(/\\+tag\s*(?:\\+\{[^{}\n]*\\+\}|\{[^{}\n]*\}|\([^()\n]*\))/g, "")
     .replace(/\\\s+/g, " ");
 }
 
@@ -81,15 +98,50 @@ function promoteEmbeddedMathEnvironments(source: string): string {
     .map((piece, index) => {
       if (index % 2 === 1) return piece;
       return piece.replace(
-        /\\begin\s*\{(array|aligned|alignedat|cases|matrix|pmatrix|bmatrix|vmatrix|Vmatrix)\}[\s\S]*?\\end\s*\{\1\}/g,
+        /\\begin\s*\{(array|aligned|alignedat|cases|matrix|pmatrix|bmatrix|vmatrix|Vmatrix)\}[\s\S]*?\\end\s*\{\1\}(?:\s*\\tag\s*(?:\\\{[^{}\n]*\\\}|\{[^{}\n]*\}|\([^()\n]*\)))?/g,
         (environment) => `\n\n$$\n${environment.trim()}\n$$\n\n`,
       );
     })
     .join("");
 }
 
+function convertEquationTags(source: string): string {
+  return source.replace(/<eq>([\s\S]*?)<\/eq>/gi, (_match, expression: string) => `$${expression.trim()}$`);
+}
+
+/** Convert the legacy HTML tables still present in some translated artifacts to the
+ * deliberately small Markdown table subset understood by this reader. The DOM is
+ * used only to extract text: no translated HTML is inserted into the page. */
+function convertHtmlTables(source: string): string {
+  if (!/<table\b/i.test(source)) return source;
+  const document = new DOMParser().parseFromString(source, "text/html");
+  for (const table of document.querySelectorAll("table")) {
+    const rows = Array.from(table.querySelectorAll("tr"))
+      .map((row) => Array.from(row.querySelectorAll("th, td"))
+        .map((cell) => (cell.textContent ?? "").trim().replace(/\|/g, "\\\\|")))
+      .filter((row) => row.length > 0);
+    if (!rows.length) {
+      table.replaceWith(document.createTextNode(""));
+      continue;
+    }
+    const width = Math.max(...rows.map((row) => row.length));
+    const normalized = rows.map((row) => [...row, ...Array(width - row.length).fill("")]);
+    const [header, ...body] = normalized;
+    const markdown = [
+      `| ${header.join(" | ")} |`,
+      `| ${Array(width).fill("---").join(" | ")} |`,
+      ...body.map((row) => `| ${row.join(" | ")} |`),
+    ].join("\n");
+    table.replaceWith(document.createTextNode(markdown));
+  }
+  return document.body.innerHTML
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
 export function prepareMarkdownForRendering(source: string): string {
-  return promoteEmbeddedMathEnvironments(source);
+  return promoteEmbeddedMathEnvironments(convertHtmlTables(convertEquationTags(source)));
 }
 
 /** Translate BookGraph workspace-relative asset links into browser-safe API URLs. */
@@ -105,13 +157,14 @@ export function resolveBookGraphImageLinks(source: string, docId: string): strin
 function isRawMath(text: string): boolean {
   const value = normalizeMathSource(text).trim();
   const hasMathSyntax = /(?:\\[A-Za-z]+|[_^]\s*\{|[=≤≥∑∫∞→⇔])/u.test(value);
-  const hasEquationMarker = /(?:=|\\(?:stackrel|x?leftrightarrow|longleftrightarrow|frac|sum|int|begin|left|right|exp|ln|log|sin|cos|min|max)\b|[_^]\s*\{)/.test(value);
+  const hasEquationMarker = /(?:=|\\(?:stackrel|x?leftrightarrow|longleftrightarrow|frac|sum|int|begin|left|right|exp|ln|log|sin|cos|min|max|lim|propto|geq|geqslant|leq|leqslant|equiv)\b|[_^]\s*\{)/.test(value);
   const hasProseSentence = /[.!?]\s+\p{L}{3,}/u.test(value);
   return !value.includes("$") && hasMathSyntax && hasEquationMarker && !hasProseSentence;
 }
 
 function mathOrInline(text: string, key: string) {
-  return isRawMath(text) ? <Math expression={normalizeMathSource(text)} /> : inline(text, key);
+  const { expression, equationTag } = extractEquationTag(text);
+  return isRawMath(expression) ? <Math expression={normalizeMathSource(expression)} equationTag={equationTag} /> : inline(text, key);
 }
 
 /** Split a Markdown table row without treating an escaped pipe (for example `\|` in
@@ -154,7 +207,8 @@ function inline(text: string, key: string) {
   const parts = normalized.split(/(\$[^$\n]+\$|`[^`]+`|<sup>[\s\S]*?<\/sup>|<sub>[\s\S]*?<\/sub>)/g);
   return parts.map((part, index) => {
     if (part.startsWith("$") && part.endsWith("$")) {
-      return <Math expression={part.slice(1, -1)} key={`${key}-math-${index}`} />;
+      const { expression, equationTag } = extractEquationTag(part.slice(1, -1));
+      return <Math expression={expression} equationTag={equationTag} key={`${key}-math-${index}`} />;
     }
     if (part.startsWith("`") && part.endsWith("`")) {
       return <code key={`${key}-code-${index}`}>{part.slice(1, -1)}</code>;
@@ -192,7 +246,12 @@ export function MarkdownArticle({ source, className = "" }: { source: string; cl
         }
         const displayMath = /^\$\$\n?([\s\S]*?)\n?\$\$$/.exec(block);
         if (displayMath) {
-          return <Math display expression={displayMath[1].trim()} key={index} />;
+          const { expression, equationTag } = extractEquationTag(displayMath[1].trim());
+          return <Math display expression={expression} equationTag={equationTag} key={index} />;
+        }
+        const { expression: untaggedBlock, equationTag } = extractEquationTag(block.trim());
+        if (equationTag) {
+          return <Math display expression={normalizeMathSource(untaggedBlock)} equationTag={equationTag} key={index} />;
         }
         const fence = /^```[^\n]*\n([\s\S]*?)\n```$/.exec(block);
         if (fence) {

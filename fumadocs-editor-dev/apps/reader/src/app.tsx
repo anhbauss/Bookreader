@@ -211,14 +211,19 @@ export function App() {
   const requestCurrentTranslation = () => {
     if (!section) return;
     setTranslationAction("next");
-    void retrySectionTranslation(location.docId, TRANSLATION_LANGUAGE, section.bookgraph.id)
+    void retrySectionTranslation(location.docId, TRANSLATION_LANGUAGE, section.bookgraph.id, true)
       .then((coverage) => {
         setCoverageState({ status: "ready", coverage, error: null });
-        const waitForTranslation = () => void getSectionTranslation(
-          location.docId, section.bookgraph.id, TRANSLATION_LANGUAGE,
-        ).then((translation) => {
+        const waitForTranslation = () => void Promise.all([
+          getSectionTranslation(location.docId, section.bookgraph.id, TRANSLATION_LANGUAGE),
+          getTranslationCoverage(location.docId, TRANSLATION_LANGUAGE),
+        ]).then(([translation, coverage]) => {
+          setCoverageState({ status: "ready", coverage, error: null });
           if (translation.status === "fresh" && Boolean(translation.content)) {
             setTranslationState({ status: "ready", translation, error: null });
+            setTranslationAction("idle");
+          } else if (coverage.status === "failed") {
+            setTranslationState({ status: "error", translation: null, error: "Không thể dịch lại section này. Hãy thử lại sau." });
             setTranslationAction("idle");
           } else {
             window.setTimeout(waitForTranslation, 1200);
@@ -268,15 +273,19 @@ export function App() {
           <p className="reader-chapter-label">{section.bookgraph.heading_path.join(" / ")}</p>
           <h1>{section.title}</h1>
           {section.description && <p className="description">{section.description}</p>}
-          {mode === "translation" ? preferences.vertical ? <div className="bilingual vertical-split"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">{TRANSLATION_LANGUAGE}</div><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} /></section></div> : <TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} className="reader-prose reader-paged-prose" /> : mode === "bilingual" ? <>
+          {mode === "translation" ? preferences.vertical ? <div className="bilingual vertical-split"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">Vietnamese</div><h2 className="translation-section-title">{translationState.translation?.translated_title ?? section.title}</h2><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} /></section></div> : <TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} className="reader-prose reader-paged-prose" /> : mode === "bilingual" ? <>
             <CoveragePanel state={coverageState} action={translationAction} onStart={startCoverage} />
-            {showTranslationAction && <section className="translation-retry" aria-label="Translate this section"><div><strong>Translation unavailable</strong><span>This section has no usable Vietnamese translation yet.</span></div><button type="button" disabled={translationAction !== "idle"} onClick={requestCurrentTranslation}>{translationAction === "next" ? "Translating…" : "Translate this section"}</button></section>}
-            <div className="bilingual"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">{TRANSLATION_LANGUAGE}</div><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} /></section></div>
+            {showTranslationAction && <section className="translation-retry" aria-label="Translate this section"><div><strong>Translation unavailable</strong><span>This section has no usable Vietnamese yet.</span></div><button type="button" disabled={translationAction !== "idle"} onClick={requestCurrentTranslation}>{translationAction === "next" ? "Translating…" : "Translate this section"}</button></section>}
+            <div className="bilingual"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">Vietnamese</div><h2 className="translation-section-title">{translationState.translation?.translated_title ?? section.title}</h2><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} /></section></div>
           </> : preferences.vertical ? <div className="bilingual vertical-split"><section><MarkdownArticle source={firstPage} /></section><section><MarkdownArticle source={secondPage} /></section></div> : <MarkdownArticle source={section.body} className="reader-prose reader-paged-prose" />}
           <nav className="section-navigation reader-pagination" aria-label="Section navigation">
             <button disabled={!section.bookgraph.prev_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.prev_id)}><ChevronLeft size={18} /> Previous Page</button>
             <button disabled={!section.bookgraph.next_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.next_id)}>Next Page <ChevronRight size={18} /></button>
           </nav>
+          {(mode === "translation" || mode === "bilingual") && <section className="translation-retranslate" aria-label="Retranslate this section">
+            <div><strong>Bản dịch có lỗi?</strong><span>Dịch lại section này để thay thế bản dịch Vietnamese hiện tại.</span></div>
+            <button type="button" disabled={translationAction !== "idle"} onClick={requestCurrentTranslation}>{translationAction === "next" ? "Đang dịch lại…" : "Dịch lại section"}</button>
+          </section>}
         </article>}
       </main>
       <aside className="reader-insights" aria-label="Reading progress and section memory">

@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-5-5-loss-functions-for-regression",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-5-5-loss-functions-for-regression.md",
+  "source_section_hash": "sha256:2b8dd73b44163d36720d9dd4a8edac6850d5887febe1f64252a8b45eb0d8679a",
+  "content_hash": "sha256:eee198ea53649de36f39f5eb7b49bae451dd00bda400ce62c2b60dc048f61c76",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-19T08:33:19.027835+00:00",
+  "notes": null,
+  "alignment": null
+}

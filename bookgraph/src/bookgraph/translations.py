@@ -159,6 +159,7 @@ def write_translation(
     model: str | None = None,
     created_at: str | None = None,
     notes: str | None = None,
+    translated_title: str | None = None,
     alignment: list[AlignedUnit] | None = None,
 ) -> SectionArtifact:
     """Persist a translation body and register it against the section's current content.
@@ -185,6 +186,7 @@ def write_translation(
         model=model,
         created_at=created_at,
         notes=notes or None,
+        translated_title=translated_title or None,
         alignment=alignment,
     )
     # Drop the old sidecar, then body, then the new sidecar (the commit record): between

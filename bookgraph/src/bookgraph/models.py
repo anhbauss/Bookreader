@@ -165,6 +165,7 @@ class SectionArtifact(BaseModel):
     model: str | None = None
     created_at: str | None = None
     notes: str | None = None
+    translated_title: str | None = None
     alignment: list[AlignedUnit] | None = None
 
 

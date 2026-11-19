@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-5-3-the-reject-option",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-5-3-the-reject-option.md",
+  "source_section_hash": "sha256:de2704ad8b8f18a8c63d187997efc8bf1cec80ab32df6796954d43e54a5aef7f",
+  "content_hash": "sha256:3d9e1ced2dc1ad116a9b01d107e8cc582ad425f4aed3507bc9520ce3ebcf14f7",
+  "includes_assets": false,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-19T08:31:28.540755+00:00",
+  "notes": null,
+  "alignment": null
+}

@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-5-4-inference-and-decision",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-5-4-inference-and-decision.md",
+  "source_section_hash": "sha256:9c490dd68010ee56959b65a50218d796632f90f226f0e42dc2f5a6ba33338ba3",
+  "content_hash": "sha256:8aebd4fbc6daafd8e8236d67c6de3b12151108624f4acaefc22dd2b879ed13f6",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-19T08:32:19.624575+00:00",
+  "notes": null,
+  "alignment": null
+}

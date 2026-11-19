@@ -387,6 +387,7 @@ class SectionArtifactView(BaseModel):
     model: str | None = None
     created_at: str | None = None
     notes: str | None = None
+    translated_title: str | None = None
     content: str | None = None
     structure_issues: list[TranslationStructureIssue] = Field(default_factory=list)
     missing_assets: list[MissingTranslationAsset] = Field(default_factory=list)

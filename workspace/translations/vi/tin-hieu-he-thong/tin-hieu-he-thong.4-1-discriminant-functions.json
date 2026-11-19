@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.4-1-discriminant-functions",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.4-1-discriminant-functions.md",
+  "source_section_hash": "sha256:9e43cefcc3bdad870e0f699840d74f6372a70729b6dc5dceec1e0c323347e8fb",
+  "content_hash": "sha256:ba1bef20e1fa59b4e068a9438401c318cb540e1421854cbe139e6ac1c68b5661",
+  "includes_assets": false,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-19T09:46:20.420834+00:00",
+  "notes": null,
+  "alignment": null
+}

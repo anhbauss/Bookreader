@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.1-6-1-relative-entropy-and-mutual-information",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-6-1-relative-entropy-and-mutual-information.md",
+  "source_section_hash": "sha256:31f00e6721cd19a00d0cefb24c02bc275e8d7cad3166dec4ccc2abe51945ceef",
+  "content_hash": "sha256:927da156411bbbe2c4c1f63df59ba2d090d7fad0c96ceea49e9ff55460967a1a",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-19T08:35:25.765047+00:00",
+  "notes": null,
+  "alignment": null
+}

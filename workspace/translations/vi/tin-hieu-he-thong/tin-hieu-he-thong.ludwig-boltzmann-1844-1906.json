@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.ludwig-boltzmann-1844-1906",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.ludwig-boltzmann-1844-1906.md",
+  "source_section_hash": "sha256:0db025180e86fee0d17127e44384248a4b064fd97f043ebb26bdd8028669add0",
+  "content_hash": "sha256:7659c8257b7a551beb5c1a83333b7f780b747e9fb8d253c9272a15d7ac3b7036",
+  "includes_assets": false,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-19T08:34:03.025899+00:00",
+  "notes": null,
+  "alignment": null
+}

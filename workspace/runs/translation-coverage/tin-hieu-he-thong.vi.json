@@ -30,14 +30,21 @@
     "tin-hieu-he-thong.1-5-2-minimizing-the-expected-loss",
     "tin-hieu-he-thong.1-5-3-the-reject-option",
     "tin-hieu-he-thong.1-5-4-inference-and-decision",
-    "tin-hieu-he-thong.1-5-5-loss-functions-for-regression"
+    "tin-hieu-he-thong.1-5-5-loss-functions-for-regression",
+    "tin-hieu-he-thong.1-6-information-theory",
+    "tin-hieu-he-thong.exercises-2",
+    "tin-hieu-he-thong.ludwig-boltzmann-1844-1906",
+    "tin-hieu-he-thong.1-6-1-relative-entropy-and-mutual-information",
+    "tin-hieu-he-thong.claude-shannon-1916-2001",
+    "tin-hieu-he-thong.2",
+    "tin-hieu-he-thong.probability-distributions",
+    "tin-hieu-he-thong.2-1-binary-variables",
+    "tin-hieu-he-thong.jacob-bernoulli-1654-1705",
+    "tin-hieu-he-thong.2-1-1-the-beta-distribution",
+    "tin-hieu-he-thong.2-2-multinomial-variables",
+    "tin-hieu-he-thong.4-1-discriminant-functions"
   ],
-  "failed_sections": {
-    "tin-hieu-he-thong.1-5-4-inference-and-decision": "Translation failed validation or provider request.",
-    "tin-hieu-he-thong.1-5-3-the-reject-option": "Translation failed validation or provider request.",
-    "tin-hieu-he-thong.1-5-2-minimizing-the-expected-loss": "Translation failed validation or provider request.",
-    "tin-hieu-he-thong.1-5-5-loss-functions-for-regression": "Translation failed validation or provider request."
-  },
+  "failed_sections": {},
   "current_section_id": null,
-  "updated_at": "2026-11-14T08:53:31.542142+00:00"
+  "updated_at": "2026-11-19T10:32:55.246924+00:00"
 }

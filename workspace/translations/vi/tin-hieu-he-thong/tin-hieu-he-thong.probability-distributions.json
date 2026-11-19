@@ -1,0 +1,15 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.probability-distributions",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.probability-distributions.md",
+  "source_section_hash": "sha256:9fd21810ab25b59aec51fca36087ce6d1ab57b5947c9b32c18f60eabe5402895",
+  "content_hash": "sha256:65b6c7fe7fb95e2b31c25158d921545fa4d0f4ce13297bea0f8402ae5e950e6d",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-19T10:32:55.229004+00:00",
+  "notes": null,
+  "translated_title": "Phân phối Xác suất",
+  "alignment": null
+}

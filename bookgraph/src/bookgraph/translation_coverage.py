@@ -152,21 +152,37 @@ def request_translation_coverage(
 
 
 def retry_translation_section(
-    workspace: WorkspacePaths, doc_id: str, lang: str, section_id: str
+    workspace: WorkspacePaths,
+    doc_id: str,
+    lang: str,
+    section_id: str,
+    *,
+    force: bool = False,
 ) -> TranslationCoverageView:
-    """Retry one section, deleting its prior cache and (re)queuing it for translation."""
+    """(Re)queue one section for translation.
+
+    ``force`` removes a usable artifact first, allowing the reader to deliberately
+    regenerate a translation that renders incorrectly rather than only retrying
+    missing or failed work.
+    """
 
     resolved_doc_id = _validate_id(doc_id, "doc_id")
-    resolved_section_id = _validate_id(section_id, "section_id")
+    # Section IDs are generated from document headings and may contain dots (for
+    # example, ``signals.1-1-introduction``).  They never become a directory
+    # component here: membership in the manifest proves the ID belongs to this
+    # document, and ``translation_paths`` independently rejects unsafe filenames.
+    resolved_section_id = section_id
     sections = _load_doc_sections(workspace, resolved_doc_id)
     ids = [section.id for section in sections]
     if resolved_section_id not in ids:
         raise ReadingServiceError("section is not part of this document")
-    # Remove the prior translation body and sidecar so a later status lookup is not
-    # fooled into treating a stale/failed artifact as still fresh.
+    # A normal retry preserves a usable translation; a forced retry is an explicit
+    # user request to regenerate a translation that is structurally or visually wrong.
+    # Remove both files before queueing so freshness cannot suppress the new job.
     cached = translation_paths(workspace, lang, resolved_doc_id, resolved_section_id)
-    cached.body.unlink(missing_ok=True)
-    cached.metadata.unlink(missing_ok=True)
+    if force:
+        cached.body.unlink(missing_ok=True)
+        cached.metadata.unlink(missing_ok=True)
     path = _record_path(workspace, resolved_doc_id, lang)
     with _record_lock(path):
         old = _read_record(path)
@@ -296,18 +312,24 @@ def _run_requested_translations(
                 if item.id == section_id
             )
             translated = provider.translate_section(section.text, target_language=lang)
+            translated_title = provider.translate_title(section.title, target_language=lang)
             write_section_translation(
                 workspace,
                 resolved_doc_id,
                 section_id,
                 lang,
                 content=translated,
+                translated_title=translated_title,
                 includes_assets=_section_has_asset_markdown(section.text),
                 model=model,
             )
         except (ReadingServiceError, StopIteration) as exc:
             _LOGGER.warning("Translation of %s failed: %s", section_id, exc)
-            _record_failure(path, section_id, "Translation failed validation or provider request.")
+            # ReadingServiceError messages are deliberately sanitised at the provider
+            # boundary, so keeping them in coverage state gives the UI an actionable
+            # retry reason without exposing provider response bodies or credentials.
+            message = str(exc) if isinstance(exc, ReadingServiceError) else "Section was not found."
+            _record_failure(path, section_id, message)
             return
         except Exception:  # pragma: no cover - final guard for background worker isolation
             _LOGGER.exception("Translation of %s failed unexpectedly", section_id)

@@ -106,6 +106,7 @@ def _artifact_view(
         model=artifact.model if artifact else None,
         created_at=artifact.created_at if artifact else None,
         notes=artifact.notes if artifact else None,
+        translated_title=artifact.translated_title if artifact else None,
         content=content,
         structure_issues=translation_structure_issues(workspace, state, section, blocks),
         missing_assets=assets.missing if assets is not None else [],
@@ -155,6 +156,7 @@ def write_section_translation(
     model: str | None = None,
     source_section_hash: str | None = None,
     notes: str | None = None,
+    translated_title: str | None = None,
     units: list[TranslationUnit] | None = None,
 ) -> SectionArtifactView:
     """Cache a section translation and register it against the section's content.
@@ -232,6 +234,7 @@ def write_section_translation(
         model=model,
         created_at=datetime.now(UTC).isoformat(),
         notes=notes,
+        translated_title=translated_title,
         alignment=alignment,
     )
     state = translation_state(workspace, resolved_lang, resolved_doc_id, section.id, current_hash)

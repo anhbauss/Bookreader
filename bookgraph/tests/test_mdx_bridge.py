@@ -145,11 +145,11 @@ def test_build_mdx_marks_untagged_fraction_equations_as_display_math(tmp_path: P
 
     mdx = (output / "signals" / "fraction.mdx").read_text()
     assert "$$\n- \\frac {1}{2}" in mdx
-    assert "\\tag{2.71}" not in mdx
+    assert "\\tag{2.71}" in mdx
     assert "\\frac \\{1\\}" not in mdx
 
 
-def test_build_mdx_strips_tags_inside_existing_display_math(tmp_path: Path) -> None:
+def test_build_mdx_preserves_tags_inside_existing_display_math(tmp_path: Path) -> None:
     section = Section(
         id="signals.tagged",
         doc_id="signals",
@@ -164,8 +164,8 @@ def test_build_mdx_strips_tags_inside_existing_display_math(tmp_path: Path) -> N
     build_mdx(tmp_path, "signals", output)
 
     mdx = (output / "signals" / "tagged.mdx").read_text()
-    assert "\\tag{2.71}" not in mdx
-    assert "$$\n\\frac{1}{2}\n$$" in mdx
+    assert "\\tag{2.71}" in mdx
+    assert "$$\n\\frac{1}{2}\\tag{2.71}\n$$" in mdx
 
 
 def test_build_mdx_marks_raw_equations_with_a_relation_as_display_math(tmp_path: Path) -> None:

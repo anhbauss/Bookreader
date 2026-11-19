@@ -7,6 +7,7 @@ from bookgraph.translation_coverage import (
     get_translation_coverage,
     request_next_translation,
     request_translation_coverage,
+    retry_translation_section,
 )
 from bookgraph.workspace import WorkspacePaths
 
@@ -67,6 +68,16 @@ def test_next_extends_only_the_immediate_section_after_current(tmp_path: Path) -
     assert view.target_sections == 2
     record = json.loads((workspace.translation_coverage_root / "signals.vi.json").read_text())
     assert record["target_section_ids"] == ["signals.0", "signals.1"]
+
+
+def test_retry_accepts_manifest_section_ids_containing_dots(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+
+    view = retry_translation_section(workspace, DOC, LANG, "signals.0")
+
+    assert view.target_sections == 1
+    record = json.loads((workspace.translation_coverage_root / "signals.vi.json").read_text())
+    assert record["target_section_ids"] == ["signals.0"]
 
 
 def test_missing_coverage_is_reported_without_creating_state(tmp_path: Path) -> None:

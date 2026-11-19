@@ -188,13 +188,17 @@ def create_app(workspace: WorkspacePaths) -> Any:
         try:
             payload = await request.json()
             section_id = payload.get("section_id") if isinstance(payload, dict) else None
+            force = payload.get("force", False) if isinstance(payload, dict) else False
             if not isinstance(section_id, str):
                 raise ReadingServiceError("Request body must contain section_id.")
+            if not isinstance(force, bool):
+                raise ReadingServiceError("force must be a boolean.")
             view = service.retry_translation_section(
                 workspace,
                 request.path_params["doc_id"],
                 request.path_params["lang"],
                 section_id,
+                force=force,
             )
             start_worker(request.path_params["doc_id"], request.path_params["lang"])
             return JSONResponse(_public_view(view))

@@ -173,8 +173,9 @@ def _convert_display_math(body: str) -> str:
     """Mark standalone LaTeX source lines as display math for the reader.
 
     Source adapters often emit equations without delimiters. Equation-number
-    commands are source annotations; KaTeX does not support ``\\tag`` without
-    its optional AMS extension, so they are stripped before rendering.
+    commands are preserved: the reader extracts ``\\tag{...}`` and renders the
+    number beside the KaTeX formula, since KaTeX itself does not implement AMS
+    equation tags.
 
     The heuristic is
     intentionally conservative: prose still needs a TeX command, mathematical
@@ -189,11 +190,9 @@ def _convert_display_math(body: str) -> str:
             continue
         stripped = block.strip()
         if _is_display_math(stripped):
-            converted.append(f"$$\n{_MATH_TAG.sub('', stripped).strip()}\n$$")
+            converted.append(f"$$\n{stripped}\n$$")
         elif stripped.startswith("$$") and stripped.endswith("$$"):
-            # Preserve already-delimited source math but remove unsupported MinerU
-            # equation-number annotations before it reaches the Reader.
-            converted.append(_MATH_TAG.sub("", block))
+            converted.append(block)
         else:
             converted.append(block)
     return "".join(converted)

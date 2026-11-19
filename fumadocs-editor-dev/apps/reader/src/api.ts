@@ -39,6 +39,7 @@ export interface SectionTranslation {
   section_id: string;
   status: TranslationStatus;
   content: string | null;
+  translated_title: string | null;
   includes_assets: boolean | null;
   section_has_assets: boolean;
   alignment_status: "aligned" | "unaligned" | "invalid" | null;
@@ -141,12 +142,12 @@ export function translateNextSection(docId: string, language: string, currentSec
   );
 }
 
-export function retrySectionTranslation(docId: string, language: string, sectionId: string): Promise<TranslationCoverage> {
+export function retrySectionTranslation(docId: string, language: string, sectionId: string, force = false): Promise<TranslationCoverage> {
   requireSafe(docId, "document id");
   requireSafe(sectionId, "section id");
   return request<TranslationCoverage>(
     `/api/documents/${encodeURIComponent(docId)}/translations/${encodeURIComponent(language)}/retry`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ section_id: sectionId }) },
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ section_id: sectionId, force }) },
   );
 }
 

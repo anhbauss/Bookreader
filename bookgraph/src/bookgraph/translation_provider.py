@@ -33,12 +33,17 @@ class TranslationProvider(Protocol):
     def translate_section(self, source: str, *, target_language: str) -> str:
         """Return a Markdown translation of one complete source section."""
 
+    def translate_title(self, title: str, *, target_language: str) -> str:
+        """Return a concise translation of one section title."""
+
 
 _SYSTEM_PROMPT = (
     "You translate book sections faithfully. Return only Markdown, never a commentary or a code "
     "fence. Preserve all Markdown structure, heading levels, link destinations, image paths, HTML "
-    "anchors, and TeX commands. Keep inline TeX inside $...$ and standalone equations inside "
-    "$$...$$. Never truncate equations or prose."
+    "anchors, and TeX commands. Preserve heading markers exactly: if the source does not "
+    "start a block with #, never add a # heading marker in the translation. Exercise prompts, "
+    "captions, and ordinary prose must remain ordinary prose, not headings. Keep inline TeX "
+    "inside $...$ and standalone equations inside $$...$$. Never truncate equations or prose."
 )
 
 
@@ -47,6 +52,14 @@ def _translation_prompt(source: str, target_language: str) -> str:
         f"Translate this complete section into {target_language}. Preserve every non-prose "
         "structural token exactly as instructed.\n\n--- SOURCE ---\n"
         f"{source}"
+    )
+
+
+def _title_translation_prompt(title: str, target_language: str) -> str:
+    return (
+        f"Translate this section title into {target_language}. Return only the translated title, "
+        "preserving numbering, names, dates, and mathematical notation.\n\n--- TITLE ---\n"
+        f"{title}"
     )
 
 
@@ -88,6 +101,30 @@ class OpenAICompatibleTranslationProvider:
             content = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             _LOGGER.warning("Translation provider returned an invalid OpenAI-compatible response")
+            raise ReadingServiceError("Translation provider returned an invalid response.") from exc
+        if not isinstance(content, str) or not content.strip():
+            raise ReadingServiceError("Translation provider returned an empty translation.")
+        return _strip_markdown_fence(content)
+
+    def translate_title(self, title: str, *, target_language: str) -> str:
+        payload = {
+            "model": self._model,
+            "temperature": 0.1,
+            "messages": [
+                {"role": "system", "content": "You translate section titles. Return only the title."},
+                {"role": "user", "content": _title_translation_prompt(title, target_language)},
+            ],
+        }
+        request = Request(
+            self._url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        data = _request_json(request, self._timeout_seconds)
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
             raise ReadingServiceError("Translation provider returned an invalid response.") from exc
         if not isinstance(content, str) or not content.strip():
             raise ReadingServiceError("Translation provider returned an empty translation.")
@@ -136,6 +173,33 @@ class AnthropicCompatibleTranslationProvider:
             )
         except (KeyError, StopIteration, TypeError) as exc:
             _LOGGER.warning("Translation provider returned an invalid Anthropic-compatible response")
+            raise ReadingServiceError("Translation provider returned an invalid response.") from exc
+        if not isinstance(content, str) or not content.strip():
+            raise ReadingServiceError("Translation provider returned an empty translation.")
+        return _strip_markdown_fence(content)
+
+    def translate_title(self, title: str, *, target_language: str) -> str:
+        payload = {
+            "model": self._model,
+            "max_tokens": 256,
+            "temperature": 0.1,
+            "system": "You translate section titles. Return only the title.",
+            "messages": [{"role": "user", "content": _title_translation_prompt(title, target_language)}],
+        }
+        request = Request(
+            self._url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "x-api-key": self._api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        data = _request_json(request, self._timeout_seconds)
+        try:
+            content = next(item["text"] for item in data["content"] if item.get("type") == "text")
+        except (KeyError, StopIteration, TypeError) as exc:
             raise ReadingServiceError("Translation provider returned an invalid response.") from exc
         if not isinstance(content, str) or not content.strip():
             raise ReadingServiceError("Translation provider returned an empty translation.")

@@ -1,0 +1,14 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.2-2-multinomial-variables",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.2-2-multinomial-variables.md",
+  "source_section_hash": "sha256:f7b6b14e793aa4eed2d8427dfcc075e4762dd8e09e6adae7a3dc6a5d87670c2f",
+  "content_hash": "sha256:a6c2917a2d18bac281e71da740f6296a8b6ed09fa7d642caedf8bf5da79e9448",
+  "includes_assets": false,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-19T10:13:02.522372+00:00",
+  "notes": null,
+  "alignment": null
+}

@@ -98,7 +98,29 @@ describe("MarkdownArticle math rendering", () => {
 
     expect(html).toContain('class="katex-display"');
     expect(html).toContain('class="mfrac"');
+    expect(html).toContain('class="math-equation-tag"');
+    expect(html).toContain(">(2.71)<");
     expect(html).not.toContain("math-error");
+  });
+
+  it("renders a tag for an undelimited equation block", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownArticle source="p (X) = \\sum_ {Y} p (X | Y) p (Y).\\tag{1.13}" />,
+    );
+
+    expect(html).toContain('class="math-equation-tag"');
+    expect(html).toContain(">(1.13)<");
+    expect(html).toContain('class="katex-display"');
+  });
+
+  it("renders a tag from generated MDX with escaped TeX braces", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownArticle source="\\mu_ \\{k\\} = - m _ \\{k\\} / \\lambda .\\tag\\{2.32\\}" />,
+    );
+
+    expect(html).toContain('class="math-equation-tag"');
+    expect(html).toContain(">(2.32)<");
+    expect(html).toContain('class="katex-display"');
   });
 
 
