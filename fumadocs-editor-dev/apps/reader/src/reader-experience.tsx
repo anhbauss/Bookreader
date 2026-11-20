@@ -21,13 +21,13 @@ export function ReaderHeader({ title, author, onSearch, onSettings, onPanel, onB
   </header>;
 }
 
-type SettingsProps = { theme: ReaderTheme; font: ReaderFont; size: ReaderSize; vertical: boolean; onTheme: (value: ReaderTheme) => void; onFont: (value: ReaderFont) => void; onSize: (value: ReaderSize) => void; onVertical: (value: boolean) => void };
+type SettingsProps = { theme: ReaderTheme; font: ReaderFont; size: ReaderSize; vertical: boolean; showVertical: boolean; onTheme: (value: ReaderTheme) => void; onFont: (value: ReaderFont) => void; onSize: (value: ReaderSize) => void; onVertical: (value: boolean) => void };
 export function VisualSettingsPopover(props: SettingsProps) {
   return <section className="visual-settings" aria-label="Visual settings">
     <SettingGroup label="Theme"><div className="theme-options">{(["light", "dark", "paper"] as const).map((theme) => <button key={theme} type="button" className={`theme-option theme-${theme} ${props.theme === theme ? "selected" : ""}`} onClick={() => props.onTheme(theme)}><i /><span>{theme}</span></button>)}</div></SettingGroup>
     <SettingGroup label="Font"><div className="choice-row">{(["serif", "sans"] as const).map((font) => <button type="button" key={font} className={props.font === font ? "selected" : ""} onClick={() => props.onFont(font)}>{font === "serif" ? "Serif" : "Sans Serif"}</button>)}</div></SettingGroup>
     <SettingGroup label="Text size"><div className="choice-row size-row">{(["s", "m", "l", "xl"] as const).map((size) => <button type="button" key={size} className={props.size === size ? "selected" : ""} onClick={() => props.onSize(size)}>{size.toUpperCase()}</button>)}</div></SettingGroup>
-    <div className="settings-toggle"><div><strong>Vertical Scroll</strong><span>Read continuously</span></div><button type="button" role="switch" aria-checked={props.vertical} className={props.vertical ? "on" : ""} onClick={() => props.onVertical(!props.vertical)}><i /></button></div>
+    {props.showVertical && <div className="settings-toggle"><div><strong>Vertical Scroll</strong><span>Read continuously</span></div><button type="button" role="switch" aria-checked={props.vertical} className={props.vertical ? "on" : ""} onClick={() => props.onVertical(!props.vertical)}><i /></button></div>}
   </section>;
 }
 function SettingGroup({ label, children }: { label: string; children: ReactNode }) { return <div className="settings-group"><p>{label}</p>{children}</div>; }

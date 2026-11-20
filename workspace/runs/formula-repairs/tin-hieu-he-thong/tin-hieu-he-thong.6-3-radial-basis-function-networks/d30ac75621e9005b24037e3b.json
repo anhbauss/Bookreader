@@ -1,0 +1,11 @@
+{
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.6-3-radial-basis-function-networks",
+  "kind": "formula",
+  "source_hash": "d30ac75621e9005b24037e3b",
+  "title": null,
+  "content": "\\{ \\mathbf { x } _ { 1 } , \\hdots , \\mathbf { x } _ { N } \\}",
+  "repaired_content": "\\{ \\mathbf{x}_{1}, \\hdots, \\mathbf{x}_{N} \\}",
+  "created_at": "2026-11-20T07:53:18.938984+00:00",
+  "accepted_at": null
+}

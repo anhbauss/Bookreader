@@ -107,6 +107,11 @@ class WorkspacePaths:
         return self.runs_root / "translation-coverage"
 
     @property
+    def formula_repairs_root(self) -> Path:
+        """Reviewed, source-keyed formula repair candidates for the reader."""
+        return self.runs_root / "formula-repairs"
+
+    @property
     def exports_root(self) -> Path:
         """Reader-facing exports such as ``bookgraph export translated-pdf`` output."""
         return self.root / "exports"
@@ -126,6 +131,7 @@ class WorkspacePaths:
             self.reading_plans_root,
             self.runs_root,
             self.translation_coverage_root,
+            self.formula_repairs_root,
         ]
 
     def as_mapping(self) -> dict[str, Path]:

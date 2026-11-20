@@ -100,6 +100,18 @@ def test_invalid_ids_and_missing_sections_have_safe_http_errors(tmp_path: Path) 
     assert str(workspace.root) not in no_plan.json()["message"]
 
 
+def test_formula_repair_endpoint_rejects_invalid_input_without_provider_call(tmp_path: Path) -> None:
+    app = create_app(_workspace(tmp_path))
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/documents/signals/sections/signals.intro/formula-repairs",
+            json={"formula": 12},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "service_error"
+
+
 def test_assets_are_scoped_to_document_images_directory(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     images = workspace.sources_parsed / "signals" / "images"

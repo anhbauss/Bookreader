@@ -62,18 +62,26 @@ export function TranslationContent({
   language,
   docId,
   className,
+  onRepairContent,
+  showContentRepairControls,
+  contentOverride,
+  articleClassName,
 }: {
   state: TranslationState;
   language: string;
   docId: string;
   className?: string;
+  articleClassName?: string;
+  onRepairContent?: (content: string, context: string, kind: "formula" | "markdown" | "region") => Promise<string>;
+  showContentRepairControls?: boolean;
+  contentOverride?: string | null;
 }) {
   const notice = translationNotice(state);
   if (notice) return <p className="translation-notice">{state.status === "loading" && <LoaderCircle className="spin" size={15} />}{notice}</p>;
   if (!canShowTranslation(state)) return null;
   const warning = translationWarning(state);
-  return <section className="translation-content" aria-label={`${language} translation`}>
+  return <section className={`translation-content ${articleClassName ?? ""}`.trim()} aria-label={`${language} translation`}>
     {warning && <p className="translation-warning"><TriangleAlert size={15} />{warning}</p>}
-    <MarkdownArticle source={resolveBookGraphImageLinks(state.translation!.content!, docId)} className={className} />
+    <MarkdownArticle source={resolveBookGraphImageLinks(contentOverride ?? state.translation!.content!, docId)} className={className} onRepairContent={onRepairContent} showContentRepairControls={showContentRepairControls} />
   </section>;
 }

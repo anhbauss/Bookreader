@@ -1,6 +1,30 @@
 import { assertSectionMatchesRoute, isSafeRouteSegment, validateOutline } from "./reader";
 import type { ReaderOutline, ReaderSection } from "./types";
 
+interface ApiDocument {
+  doc_id: string;
+  title: string;
+  section_count: number;
+}
+
+interface ApiDocumentList {
+  documents: ApiDocument[];
+}
+
+interface ApiSection {
+  id: string;
+  doc_id: string;
+  title: string;
+  level: number;
+  heading_path: string[];
+  page_start: number | null;
+  page_end: number | null;
+  text: string;
+  prev_id: string | null;
+  next_id: string | null;
+  block_ids: string[];
+}
+
 const FRONTMATTER = /^---\n(?<frontmatter>[\s\S]*?)\n---\n?(?<body>[\s\S]*)$/;
 
 /**
@@ -11,9 +35,38 @@ export async function loadSection(docId: string, sectionId: string): Promise<Rea
   if (!isSafeRouteSegment(docId) || !isSafeRouteSegment(sectionId)) {
     throw new Error("The reader URL contains an invalid document or section id.");
   }
-  const response = await fetch(`/content/${encodeURIComponent(docId)}/${encodeURIComponent(sectionId)}.mdx`);
+  // The backend reads canonical section Markdown at request time. This means a user
+  // accepted AI repair remains visible after the server or browser restarts, unlike
+  // generated public MDX which is only refreshed by a separate build step.
+  const canonicalId = sectionId.startsWith(`${docId}.`) ? sectionId : `${docId}.${sectionId}`;
+  const response = await fetch(`/api/documents/${encodeURIComponent(docId)}/sections/${encodeURIComponent(canonicalId)}`);
   if (!response.ok) throw new Error(response.status === 404 ? "Section not found" : "Unable to load section");
-  return assertSectionMatchesRoute(parseSection(await response.text()), docId, sectionId);
+  const section = await response.json() as ApiSection;
+  return assertSectionMatchesRoute({
+    title: section.title,
+    bookgraph: {
+      id: section.id,
+      doc_id: section.doc_id,
+      level: section.level,
+      heading_path: section.heading_path,
+      page_start: section.page_start,
+      page_end: section.page_end,
+      prev_id: section.prev_id,
+      next_id: section.next_id,
+      block_ids: section.block_ids,
+    },
+    body: section.text,
+  }, docId, sectionId);
+}
+
+export async function loadDocumentTitle(docId: string): Promise<string> {
+  if (!isSafeRouteSegment(docId)) throw new Error("The reader URL contains an invalid document id.");
+  const response = await fetch("/api/documents");
+  if (!response.ok) throw new Error("Unable to load document details");
+  const documents = (await response.json() as ApiDocumentList).documents;
+  const document = documents.find((candidate) => candidate.doc_id === docId);
+  if (!document) throw new Error("Document not found");
+  return document.title;
 }
 
 export async function loadOutline(docId: string): Promise<ReaderOutline> {

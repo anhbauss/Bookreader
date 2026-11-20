@@ -1,0 +1,15 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.12-3-kernel-pea",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.12-3-kernel-pea.md",
+  "source_section_hash": "sha256:0fffdd1316b41e1571a95eda62d6199a4b709cabcaba96520281795e1b3f1295",
+  "content_hash": "sha256:1bde9e09654eb5038d3c188ef478ac8fdf09d59114e5fd5ec42650d3e5716050",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-19T12:08:15.593078+00:00",
+  "notes": null,
+  "translated_title": "12.3. Kernel peA",
+  "alignment": null
+}

@@ -1,8 +1,12 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  getAcceptedSectionRepair,
   getReadingProgress,
   getSectionContext,
+  acceptSectionRepair,
+  repairSectionContent,
+  type ContentRepair,
   getSectionTranslation,
   getTranslationCoverage,
   markSectionRead,
@@ -11,8 +15,8 @@ import {
   translateNextSection,
   type SectionContext,
 } from "./api";
-import { loadOutline, loadSection } from "./content";
-import { MarkdownArticle } from "./markdown";
+import { loadDocumentTitle, loadOutline, loadSection } from "./content";
+import { MarkdownArticle, resolveBookGraphImageLinks } from "./markdown";
 import { MemoryPanel, ProgressPanel } from "./reader-panels";
 import { planIdForDocument, progressFromMarkRead, type MarkReadState, type ReaderProgressState } from "./reading";
 import { canonicalSectionId, sectionUrl, validateReaderRoute } from "./reader";
@@ -36,17 +40,93 @@ function navigate(docId: string, sectionId: string, mode?: ReadingMode) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-/** Split content only at Markdown block boundaries so the two reading panes flow in order. */
+/**
+ * Divide the original reader's two-page view by reading length, not just by Markdown
+ * blocks. Long prose paragraphs are deliberately split at a word boundary so one page
+ * does not become much taller simply because it contains one more paragraph.
+ */
 function splitSequentialPages(source: string): [string, string] {
   const blocks = source.trim().split(/\n{2,}/).filter(Boolean);
-  const midpoint = Math.ceil(blocks.length / 2);
-  return [blocks.slice(0, midpoint).join("\n\n"), blocks.slice(midpoint).join("\n\n")];
+  if (blocks.length < 2) {
+    const onlyBlock = source.trim();
+    return canSplitWithinParagraph(onlyBlock)
+      ? splitParagraphAtReadingMidpoint(onlyBlock)
+      : [onlyBlock, ""];
+  }
+
+  const weights = blocks.map(readingWeight);
+  const target = weights.reduce((total, weight) => total + weight, 0) / 2;
+  let consumed = 0;
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    const weight = weights[index];
+    const nextConsumed = consumed + weight;
+    if (nextConsumed < target) {
+      consumed = nextConsumed;
+      continue;
+    }
+
+    const before = blocks.slice(0, index);
+    const after = blocks.slice(index + 1);
+    if (canSplitWithinParagraph(block)) {
+      const [firstHalf, secondHalf] = splitParagraphAtReadingMidpoint(
+        block,
+        (target - consumed) / weight * block.length,
+      );
+      return [[...before, firstHalf].filter(Boolean).join("\n\n"), [secondHalf, ...after].filter(Boolean).join("\n\n")];
+    }
+    // Never split a figure, table, formula, or code block. Pick the side whose total
+    // estimated rendered height will be closer to the other one instead.
+    const keepOnFirstPage = Math.abs(nextConsumed - target) <= Math.abs(consumed - target);
+    return keepOnFirstPage
+      ? [blocks.slice(0, index + 1).join("\n\n"), after.join("\n\n")]
+      : [before.join("\n\n"), [block, ...after].join("\n\n")];
+  }
+  return [blocks.join("\n\n"), ""];
+}
+
+function readingWeight(block: string): number {
+  const trimmed = block.trim();
+  // Text length is a useful baseline, while these indivisible blocks consume visual
+  // height out of proportion to their Markdown source length.
+  if (/^!\[[^\]]*\]\([^)]*\)$/.test(trimmed)) return 1_200;
+  if (/^\|[\s\S]*\n\|\s*:?-+/.test(trimmed) || /<table\b/i.test(trimmed)) {
+    const rows = Math.max(1, trimmed.split("\n").length - 1);
+    return 400 + rows * 180;
+  }
+  if (/^\$\$[\s\S]*?\$\$$/.test(trimmed) || /\\(?:begin|left|right)\b/.test(trimmed)) return 550;
+  return trimmed.length;
+}
+
+function canSplitWithinParagraph(block: string): boolean {
+  const trimmed = block.trim();
+  const isDisplayMath = /^\$\$[\s\S]*?\$\$$/.test(trimmed);
+  const isRawMath = /(?:\\[A-Za-z]+|[_^]\s*\{|\b(?:sin|cos|log|exp)\s*\(|[=≤≥∑∫∞→])/u.test(trimmed)
+    && !/[.!?]\s+\p{L}{3,}/u.test(trimmed);
+  return !/^(?:```|#|[-*]\s|\d+\.\s|\||!\[)/.test(trimmed)
+    && !isDisplayMath
+    && !isRawMath
+    && !/\\(?:begin|left|right)\b/.test(trimmed);
+}
+
+function splitParagraphAtReadingMidpoint(source: string, midpoint = source.length / 2): [string, string] {
+  const text = source.trim();
+  if (!text) return ["", ""];
+  const target = Math.max(1, Math.min(text.length - 1, Math.round(midpoint)));
+  const after = text.slice(target).search(/\s+/);
+  const before = text.slice(0, target).search(/\s+[^\s]*$/);
+  const right = after < 0 ? -1 : target + after;
+  const left = before < 0 ? -1 : before;
+  const splitAt = left < 0 ? right : right < 0 ? left : target - left <= right - target ? left : right;
+  if (splitAt < 1) return [text, ""];
+  return [text.slice(0, splitAt).trimEnd(), text.slice(splitAt).trimStart()];
 }
 
 export function App() {
   if (!window.location.search) return <LibraryPage />;
   const [location, setLocation] = useState(route);
   const [section, setSection] = useState<ReaderSection | null>(null);
+  const [bookTitle, setBookTitle] = useState<string | null>(null);
   const [outline, setOutline] = useState<ReaderOutline | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [context, setContext] = useState<SectionContext | null>(null);
@@ -58,6 +138,13 @@ export function App() {
   const [translationState, setTranslationState] = useState<TranslationState>({ status: "idle", translation: null, error: null });
   const [coverageState, setCoverageState] = useState<TranslationCoverageState>({ status: "idle", coverage: null, error: null });
   const [translationAction, setTranslationAction] = useState<"idle" | "starting" | "next">("idle");
+  const [sectionRepairAction, setSectionRepairAction] = useState<"idle" | "repairing" | "failed">("idle");
+  const [sectionRepairError, setSectionRepairError] = useState<string | null>(null);
+  const [sectionRepairCandidate, setSectionRepairCandidate] = useState<ContentRepair | null>(null);
+  const [sectionRepairSaveState, setSectionRepairSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [repairedOriginal, setRepairedOriginal] = useState<string | null>(null);
+  const [repairedTitle, setRepairedTitle] = useState<string | null>(null);
+  const [repairedTranslation, setRepairedTranslation] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -94,12 +181,24 @@ export function App() {
     }
     let cancelled = false;
     setError(null);
+    setRepairedOriginal(null);
+    setRepairedTitle(null);
+    setRepairedTranslation(null);
+    setSectionRepairCandidate(null);
+    setSectionRepairError(null);
+    setSectionRepairSaveState("idle");
     setSection(null);
-    void Promise.all([loadSection(location.docId, location.sectionId), loadOutline(location.docId)])
-      .then(([nextSection, nextOutline]) => {
+    setBookTitle(null);
+    void Promise.all([
+      loadSection(location.docId, location.sectionId),
+      loadOutline(location.docId),
+      loadDocumentTitle(location.docId),
+    ])
+      .then(([nextSection, nextOutline, nextBookTitle]) => {
         if (cancelled) return;
         setSection(nextSection);
         setOutline(nextOutline);
+        setBookTitle(nextBookTitle);
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : "Unable to load reader content");
@@ -239,6 +338,69 @@ export function App() {
         setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" });
       });
   };
+  const repairCurrentContent = (content: string, context: string, kind: "formula" | "markdown" | "region"): Promise<string> => {
+    if (!section) return Promise.reject(new Error("Section is not available"));
+    return repairSectionContent(location.docId, section.bookgraph.id, content, context, kind)
+      .then((repair) => repair.repaired_content);
+  };
+  const repairEntireSection = () => {
+    if (!section || sectionRepairAction === "repairing") return;
+    // Save commits to the manifest-backed Original Markdown section, so repair that
+    // source consistently even while the reader is in Vietnamese or bilingual mode.
+    const repairSource = section.body;
+    setSectionRepairAction("repairing");
+    setSectionRepairError(null);
+    void repairSectionContent(location.docId, section.bookgraph.id, repairSource, repairSource, "markdown")
+      .then((repair) => {
+        setRepairedOriginal(repair.repaired_content);
+        setRepairedTitle(repair.title);
+        setSectionRepairCandidate(repair);
+        setSectionRepairSaveState("idle");
+        setSectionRepairAction("idle");
+      })
+      .catch((reason: unknown) => {
+        setSectionRepairAction("failed");
+        setSectionRepairError(reason instanceof Error ? reason.message : "Không thể sửa section này.");
+      });
+  };
+  const undoSectionRepair = () => {
+    setRepairedOriginal(null);
+    setRepairedTitle(null);
+    setRepairedTranslation(null);
+    setSectionRepairCandidate(null);
+    setSectionRepairError(null);
+    setSectionRepairSaveState("idle");
+  };
+  const saveSectionRepair = () => {
+    if (!sectionRepairCandidate || !section || sectionRepairSaveState === "saving") return;
+    setSectionRepairSaveState("saving");
+    void acceptSectionRepair(location.docId, section.bookgraph.id, sectionRepairCandidate.source_hash)
+      .then((accepted) => {
+        setRepairedOriginal(accepted.repaired_content);
+        setRepairedTitle(accepted.title);
+        if (accepted.title) {
+          setOutline((current) => current ? {
+            ...current,
+            nodes: current.nodes.map((node) => node.id === section.bookgraph.id ? { ...node, title: accepted.title! } : node),
+          } : current);
+          setSection((current) => current ? {
+            ...current,
+            title: accepted.title!,
+            bookgraph: {
+              ...current.bookgraph,
+              heading_path: current.bookgraph.heading_path.length
+                ? [...current.bookgraph.heading_path.slice(0, -1), accepted.title!]
+                : current.bookgraph.heading_path,
+            },
+          } : current);
+        }
+        setSectionRepairSaveState("saved");
+      })
+      .catch((reason: unknown) => {
+        setSectionRepairSaveState("failed");
+        setSectionRepairError(reason instanceof Error ? reason.message : "Không thể lưu bản sửa.");
+      });
+  };
   const onMarkRead = () => {
     if (!section) return;
     setMarkState({ status: "saving", message: null });
@@ -260,28 +422,40 @@ export function App() {
     window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown);
   }, [preferences.vertical, searchOpen, settingsOpen, drawerOpen, section]);
 
-  const readerSource = section?.body ?? "";
+  const readerSource = section ? resolveBookGraphImageLinks(repairedOriginal ?? section.body, location.docId) : "";
   const [firstPage, secondPage] = useMemo(() => splitSequentialPages(readerSource), [readerSource]);
   return (
-    <div className={`reader-shell reader-experience reader-font-${preferences.font} reader-size-${preferences.size} ${mode === "bilingual" || preferences.vertical ? "reader-bilingual" : ""}`} data-reader-theme={preferences.theme}>
-      <ReaderHeader title={section?.title ?? location.docId ?? "Book Reader"} author="Alan V. Oppenheim" onSearch={() => setSearchOpen(true)} onSettings={() => setSettingsOpen((value) => !value)} onPanel={() => setDrawerOpen(true)} onBookmark={() => setBookmarked((value) => !value)} bookmarked={bookmarked} />
-      {settingsOpen && <div className="visual-settings-anchor"><VisualSettingsPopover theme={preferences.theme} font={preferences.font} size={preferences.size} vertical={preferences.vertical} onTheme={preferences.setTheme} onFont={preferences.setFont} onSize={preferences.setSize} onVertical={preferences.setVertical} /></div>}
+    <div className={`reader-shell reader-experience reader-font-${preferences.font} reader-size-${preferences.size} reader-mode-${mode} ${(mode !== "bilingual" && preferences.vertical) ? "reader-vertical" : ""}`} data-reader-theme={preferences.theme}>
+      <ReaderHeader title={bookTitle ?? location.docId ?? "Book Reader"} author="Alan V. Oppenheim" onSearch={() => setSearchOpen(true)} onSettings={() => setSettingsOpen((value) => !value)} onPanel={() => setDrawerOpen(true)} onBookmark={() => setBookmarked((value) => !value)} bookmarked={bookmarked} />
+      {settingsOpen && <div className="visual-settings-anchor"><VisualSettingsPopover theme={preferences.theme} font={preferences.font} size={preferences.size} vertical={preferences.vertical} showVertical={mode !== "bilingual"} onTheme={preferences.setTheme} onFont={preferences.setFont} onSize={preferences.setSize} onVertical={preferences.setVertical} /></div>}
       {searchOpen && <SearchModal source={readerSource} onClose={() => setSearchOpen(false)} onResult={(id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" })} />}
       <ReaderDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} mode={mode} onMode={changeMode}><aside className="toc" aria-label="Table of contents"><div className="toc-heading"><span>Contents</span></div>{tree.map((node) => <button key={node.id} className={`toc-item level-${Math.min(node.level, 4)} ${node.id === currentId ? "active" : ""}`} onClick={() => go(node.id)}>{node.title}</button>)}</aside></ReaderDrawer>
-      <main className={`reader-main reader-reading-area ${mode === "bilingual" || preferences.vertical ? "reader-main-bilingual" : ""}`}>
+      <main className={`reader-main reader-reading-area reader-main-${mode} ${(mode !== "bilingual" && preferences.vertical) ? `reader-main-${mode}-vertical` : ""}`}>
         {error ? <State title="Unable to open reader" message={error} /> : !section ? <State title="Loading section" message="Reading immutable BookGraph content…" /> : <article>
           <p className="reader-chapter-label">{section.bookgraph.heading_path.join(" / ")}</p>
-          <h1>{section.title}</h1>
+          <h1>{repairedTitle ?? section.title}</h1>
           {section.description && <p className="description">{section.description}</p>}
-          {mode === "translation" ? preferences.vertical ? <div className="bilingual vertical-split"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">Vietnamese</div><h2 className="translation-section-title">{translationState.translation?.translated_title ?? section.title}</h2><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} /></section></div> : <TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} className="reader-prose reader-paged-prose" /> : mode === "bilingual" ? <>
+          {mode === "translation" ? <TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} className={preferences.vertical ? "reader-prose reader-paged-prose translation-vertical-columns" : "reader-prose reader-paged-prose"} articleClassName={preferences.vertical ? "translation-vertical-content" : undefined} onRepairContent={repairCurrentContent} contentOverride={repairedTranslation} /> : mode === "bilingual" ? <>
             <CoveragePanel state={coverageState} action={translationAction} onStart={startCoverage} />
             {showTranslationAction && <section className="translation-retry" aria-label="Translate this section"><div><strong>Translation unavailable</strong><span>This section has no usable Vietnamese yet.</span></div><button type="button" disabled={translationAction !== "idle"} onClick={requestCurrentTranslation}>{translationAction === "next" ? "Translating…" : "Translate this section"}</button></section>}
-            <div className="bilingual"><section><div className="language-label">Original</div><MarkdownArticle source={section.body} /></section><section><div className="language-label">Vietnamese</div><h2 className="translation-section-title">{translationState.translation?.translated_title ?? section.title}</h2><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} /></section></div>
-          </> : preferences.vertical ? <div className="bilingual vertical-split"><section><MarkdownArticle source={firstPage} /></section><section><MarkdownArticle source={secondPage} /></section></div> : <MarkdownArticle source={section.body} className="reader-prose reader-paged-prose" />}
+            <div className="bilingual"><section><div className="language-label">Original</div><h2 className="original-section-title">{repairedTitle ?? section.title}</h2><MarkdownArticle source={resolveBookGraphImageLinks(repairedOriginal ?? section.body, location.docId)} onRepairContent={repairCurrentContent} /></section><section><div className="language-label">Vietnamese</div><h2 className="translation-section-title">{translationState.translation?.translated_title ?? section.title}</h2><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} onRepairContent={repairCurrentContent} contentOverride={repairedTranslation} /></section></div>
+          </> : preferences.vertical ? <MarkdownArticle source={readerSource} className="reader-prose reader-paged-prose original-vertical-columns" onRepairContent={repairCurrentContent} /> : <MarkdownArticle source={readerSource} className="reader-prose reader-paged-prose" onRepairContent={repairCurrentContent} />}
           <nav className="section-navigation reader-pagination" aria-label="Section navigation">
             <button disabled={!section.bookgraph.prev_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.prev_id)}><ChevronLeft size={18} /> Previous Page</button>
             <button disabled={!section.bookgraph.next_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.next_id)}>Next Page <ChevronRight size={18} /></button>
           </nav>
+          {mode !== "translation" && <section className="formula-repair-section" aria-label="Content rendering repair tools">
+            <div><strong>Nội dung hiển thị lỗi?</strong><span>AI sẽ đọc và sửa toàn bộ section đang xem, bao gồm cả chữ, Markdown và công thức.</span>{sectionRepairError && <small className="content-repair-error">{sectionRepairError}</small>}</div>
+            <div className="content-repair-actions">
+              <button type="button" disabled={sectionRepairAction === "repairing" || sectionRepairSaveState === "saved"} onClick={repairEntireSection}>
+                {sectionRepairAction === "repairing" ? "Đang sửa section…" : sectionRepairAction === "failed" ? "Thử sửa lại section" : "Sửa section bằng AI"}
+              </button>
+              {sectionRepairCandidate && sectionRepairSaveState !== "saved" && <button type="button" className="secondary" onClick={undoSectionRepair}>Undo</button>}
+              {sectionRepairCandidate && <button type="button" className="save" disabled={sectionRepairSaveState === "saving" || sectionRepairSaveState === "saved"} onClick={saveSectionRepair}>
+                {sectionRepairSaveState === "saving" ? "Đang lưu…" : sectionRepairSaveState === "saved" ? "Đã lưu" : sectionRepairSaveState === "failed" ? "Lưu lại" : "Save"}
+              </button>}
+            </div>
+          </section>}
           {(mode === "translation" || mode === "bilingual") && <section className="translation-retranslate" aria-label="Retranslate this section">
             <div><strong>Bản dịch có lỗi?</strong><span>Dịch lại section này để thay thế bản dịch Vietnamese hiện tại.</span></div>
             <button type="button" disabled={translationAction !== "idle"} onClick={requestCurrentTranslation}>{translationAction === "next" ? "Đang dịch lại…" : "Dịch lại section"}</button>

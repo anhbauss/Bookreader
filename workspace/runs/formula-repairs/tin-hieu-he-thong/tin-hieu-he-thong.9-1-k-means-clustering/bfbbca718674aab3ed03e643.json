@@ -1,0 +1,11 @@
+{
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.9-1-k-means-clustering",
+  "kind": "formula",
+  "source_hash": "bfbbca718674aab3ed03e643",
+  "title": null,
+  "content": "\\right.",
+  "repaired_content": "\\left\\{ \\begin{array}{ll} 1 & \\text{if } k = \\arg \\min_{j} \\| \\mathbf{x}_{n} - \\boldsymbol{\\mu}_{j} \\|^{2} \\\\ 0 & \\text{otherwise.} \\end{array} \\right.",
+  "created_at": "2026-11-19T15:16:40.725725+00:00",
+  "accepted_at": null
+}

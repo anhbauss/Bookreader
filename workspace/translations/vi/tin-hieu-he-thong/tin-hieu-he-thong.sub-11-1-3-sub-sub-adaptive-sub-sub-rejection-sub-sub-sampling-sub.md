@@ -1,0 +1,25 @@
+Trong nhiều trường hợp mà chúng ta có thể muốn áp dụng rejection sampling, việc xác định một dạng giải tích phù hợp cho phân phối bao $q ( z )$ tỏ ra khó khăn. Một cách tiếp cận khác là xây dựng hàm bao trên cơ sở các giá trị đo được của phân phối $p ( z )$ (Gilks and Wild, 1992). Việc xây dựng hàm bao được đơn giản hóa đặc biệt trong các trường hợp mà $p ( z )$ là log concave, nói cách khác là khi ln $p ( z )$ có các đạo hàm là các hàm không tăng của z. Việc xây dựng hàm bao phù hợp được minh họa bằng đồ thị trong Hình 11.6.
+
+Hàm ln $p ( z )$ và gradient của nó được tính toán tại một tập hợp các điểm lưới ban đầu, và các giao điểm của các đường tiếp tuyến thu được được sử dụng để xây dựng hàm bao. Tiếp theo, một giá trị mẫu được lấy từ phân phối bao. Điều này rất đơn giản vì logarit của phân phối bao là một chuỗi các hàm tuyến tính, do đó phân phối bao chính nó bao gồm một phân phối mũ từng phần có dạng
+
+Trong trường hợp các phân phối là log concave, hàm bao để sử dụng trong rejection sampling có thể được xây dựng bằng cách sử dụng các đường tiếp tuyến được tính toán tại một tập hợp các điểm lưới. Nếu một điểm mẫu bị loại bỏ, nó được thêm vào tập hợp các điểm lưới và được sử dụng để tinh chỉnh phân phối bao.
+
+![image](images/part-003--38b36c30d57b20e7fc55c772d3d035cac44464dcf656455fe2482ef6e28609d6.jpg)
+
+Hình 11.7 Ví dụ minh họa về rejection sampling liên quan đến lấy mẫu từ phân phối Gaussian $p ( z )$ được hiển thị bằng đường cong xanh lá cây, bằng cách sử dụng rejection sampling từ phân phối đề xuất $\overset { \cdot } { q } ( z )$ cũng là Gaussian và phiên bản được chia tỷ lệ của nó $k q ( z )$ được hiển thị bằng đường cong màu đỏ.
+
+![image](images/part-003--51c28c7dda4af343ce0b04ed09053123b117ecfaf63b28e9bca13b05d0f31f0b.jpg)
+
+q (z) = k _ {i} \lambda_ {i} \exp \left\{- \lambda_ {i} (z - z _ {i - 1}) \right\} \quad z _ {i - 1} <   z \leqslant z _ {i}.\tag{11.17}
+
+Khi một mẫu đã được lấy, tiêu chí loại bỏ thông thường có thể được áp dụng. Nếu mẫu được chấp nhận, thì nó sẽ là một rút ra từ phân phối mong muốn. Tuy nhiên, nếu mẫu bị loại bỏ, thì nó được đưa vào tập hợp các điểm lưới, một đường tiếp tuyến mới được tính toán, và hàm bao được tinh chỉnh do đó. Khi số lượng điểm lưới tăng lên, hàm bao trở thành một xấp xỉ tốt hơn của phân phối mong muốn $p ( z )$ và xác suất loại bỏ giảm đi.
+
+Một biến thể của thuật toán tồn tại để tránh tính toán của các đạo hàm (Gilks, 1992). Khuôn khổ adaptive rejection sampling cũng có thể được mở rộng để bao gồm các phân phối không phải là log concave, đơn giản bằng cách theo sau mỗi bước rejection sampling bằng một bước Metropolis-Hastings (sẽ được thảo luận trong Phần 11.2.2), dẫn đến adaptive rejection Metropolis sampling (Gilks et al., 1995).
+
+Rõ ràng, để rejection sampling có giá trị thực tế, chúng ta yêu cầu rằng hàm so sánh gần gũi với phân phối yêu cầu sao cho tỷ lệ loại bỏ được giữ ở mức tối thiểu. Bây giờ chúng ta hãy xem xét điều gì xảy ra khi chúng ta cố gắng sử dụng rejection sampling trong các không gian có chiều cao. Hãy xem xét, vì lợi ích của minh họa, một vấn đề hơi nhân tạo trong đó chúng ta muốn lấy mẫu từ phân phối Gaussian đa biến trung bình bằng không với hiệp phương sai $\sigma _ { p } ^ { 2 } \mathbf { I }$ , trong đó I là ma trận đơn vị, bằng rejection sampling từ phân phối đề xuất cũng là phân phối Gaussian trung bình bằng không có hiệp phương sai ${ \bar { \sigma } } _ { q } ^ { 2 } \mathbf { I }$ . Rõ ràng, chúng ta phải có $\sigma _ { q } ^ { 2 } \geqslant \sigma _ { p } ^ { 2 }$ để có tồn tại một k sao cho $k q ( z ) \stackrel { \triangledown } { \geqslant } p ( z )$ . Trong D-chiều, giá trị tối ưu của k được cho bởi $k = ( \sigma _ { q } / \sigma _ { p } ) ^ { D }$ , như được minh họa cho $D = 1$ trong Hình 11.7. Tỷ lệ chấp nhận sẽ là tỷ số các thể tích dưới $p ( z )$ và $k q ( z )$ , mà, vì cả hai phân phối đều được chuẩn hóa, chỉ là $1 / k$ . Do đó, tỷ lệ chấp nhận giảm dần theo cấp số nhân với chiều. Ngay cả khi $\sigma _ { q }$ vượt quá $\sigma _ { p }$ chỉ một phần trăm, đối với $D = 1 , 0 0 0$ tỷ lệ chấp nhận sẽ xấp xỉ $1 / 2 0 , 0 0 0$ Trong ví dụ minh họa này, hàm so sánh gần gũi với phân phối yêu cầu. Đối với các ví dụ thực tế hơn, trong đó phân phối mong muốn có thể là đa phương thức và sắc nét, sẽ cực kỳ khó khăn để tìm một phân phối đề xuất và hàm so sánh tốt.
+
+Hình 11.8 Importance sampling giải quyết vấn đề đánh giá kỳ vọng của hàm $f ( z )$ liên quan đến phân phối $p ( z )$ mà từ đó rất khó để lấy mẫu trực tiếp. Thay vào đó, các mẫu $\{ z ^ { ( l ) } \}$ được lấy từ phân phối đơn giản hơn $q ( z )$ , và các số hạng tương ứng trong tổng được cân bằng bởi các tỷ số $p ( z ^ { ( l ) } ) / q ( z ^ { ( l ) } )$ .
+
+![image](images/part-003--f5f8ead216940804d29fb060c83e03fb3ecb9d18d2fed30683cde1abba04deb6.jpg)
+
+Hơn nữa, sự giảm dần theo cấp số nhân của tỷ lệ chấp nhận theo chiều là một tính năng chung của rejection sampling. Mặc dù loại bỏ có thể là một kỹ thuật hữu ích trong một hoặc hai chiều, nhưng nó không phù hợp với các vấn đề có chiều cao. Tuy nhiên, nó có thể đóng một vai trò như một subroutine trong các thuật toán tinh vi hơn để lấy mẫu trong các không gian có chiều cao.

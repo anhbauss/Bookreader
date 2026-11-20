@@ -10,6 +10,7 @@ const fresh: TranslationState = {
     section_id: "signals.sampling",
     status: "fresh",
     content: "Bản dịch.",
+    translated_title: "Tiêu đề.",
     includes_assets: true,
     section_has_assets: false,
     alignment_status: "aligned",

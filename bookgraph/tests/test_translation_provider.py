@@ -52,6 +52,12 @@ def test_anthropic_provider_posts_messages_request_and_reads_text_response() -> 
     assert title_payload["messages"][0]["content"].endswith("--- TITLE ---\nDecision Theory")
 
 
+def test_formula_repair_requires_a_single_safe_json_formula() -> None:
+    from bookgraph.translation_provider import _formula_repair_result
+
+    assert _formula_repair_result('{"formula":"\\\\frac{1}{2}"}') == "\\frac{1}{2}"
+
+
 def test_configured_provider_selects_anthropic_provider_from_environment(
     monkeypatch: MonkeyPatch,
 ) -> None:

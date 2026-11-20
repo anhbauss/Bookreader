@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from bookgraph.formula_repairs import accept_repair, get_accepted_repair, repair_content
 from bookgraph.mcp import service
 from bookgraph.mcp.errors import (
     ConceptNotFoundError,
@@ -205,6 +206,55 @@ def create_app(workspace: WorkspacePaths) -> Any:
         except ReadingServiceError as exc:
             return _error(JSONResponse, 400, "service_error", str(exc))
 
+    async def repair_section_formula(request: Request) -> Any:
+        try:
+            payload = await request.json()
+            formula = payload.get("content") if isinstance(payload, dict) else None
+            context = payload.get("context", "") if isinstance(payload, dict) else ""
+            kind = payload.get("kind", "formula") if isinstance(payload, dict) else "formula"
+            if not isinstance(formula, str) or not isinstance(context, str) or kind not in {"formula", "markdown", "region"}:
+                raise ReadingServiceError("Request body must contain content, optional text context, and a valid kind.")
+            return JSONResponse(
+                _public_view(
+                    repair_content(
+                        workspace,
+                        request.path_params["doc_id"],
+                        request.path_params["section_id"],
+                        formula,
+                        context,
+                        kind,
+                    )
+                )
+            )
+        except ReadingServiceError as exc:
+            return _error(JSONResponse, 400, "service_error", str(exc))
+
+    async def accepted_section_repair(request: Request) -> Any:
+        return response(
+            lambda: get_accepted_repair(
+                workspace, request.path_params["doc_id"], request.path_params["section_id"]
+            )
+        )
+
+    async def accept_section_repair(request: Request) -> Any:
+        try:
+            payload = await request.json()
+            source_hash = payload.get("source_hash") if isinstance(payload, dict) else None
+            if not isinstance(source_hash, str):
+                raise ReadingServiceError("Request body must contain source_hash.")
+            return JSONResponse(
+                _public_view(
+                    accept_repair(
+                        workspace,
+                        request.path_params["doc_id"],
+                        request.path_params["section_id"],
+                        source_hash,
+                    )
+                )
+            )
+        except ReadingServiceError as exc:
+            return _error(JSONResponse, 400, "service_error", str(exc))
+
     async def concept(request: Request) -> Any:
         return response(lambda: service.get_concept(workspace, request.path_params["concept"]))
 
@@ -266,6 +316,21 @@ def create_app(workspace: WorkspacePaths) -> Any:
         Route(
             "/api/documents/{doc_id:str}/translations/{lang:str}/retry",
             retry_translation,
+            methods=["POST"],
+        ),
+        Route(
+            "/api/documents/{doc_id:str}/sections/{section_id:str}/formula-repairs",
+            repair_section_formula,
+            methods=["POST"],
+        ),
+        Route(
+            "/api/documents/{doc_id:str}/sections/{section_id:str}/formula-repairs/accepted",
+            accepted_section_repair,
+            methods=["GET"],
+        ),
+        Route(
+            "/api/documents/{doc_id:str}/sections/{section_id:str}/formula-repairs/accept",
+            accept_section_repair,
             methods=["POST"],
         ),
         Route("/api/concepts/{concept:str}", concept, methods=["GET"]),

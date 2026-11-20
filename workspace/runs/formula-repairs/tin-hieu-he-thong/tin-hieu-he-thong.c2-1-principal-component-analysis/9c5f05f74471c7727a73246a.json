@@ -1,0 +1,10 @@
+{
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.c2-1-principal-component-analysis",
+  "kind": "markdown",
+  "source_hash": "9c5f05f74471c7727a73246a",
+  "content": "Principal compooem analy,;\" or rcA.;s a technique tha! is \"'idely u<ed for appli. cations such as dimensionality .-eduction, lossy data comprc\"ion, feature e>tracti\"\". and data v;,ualizatiOll (Jolliffe, 2(02). It;s also kno.... \" as tile Karoan.n·I..,;\"\" tran,· f~.\n\nlbcrc an: t....o commonly used definitions of PeA that giye rise to the >arne algorithm. PeA can be defined as the unhog<lnal projtttion of the data O/1tO a lo....er dimensionallincar space. kno....n as the pri/lcip.al $uh.•p.aa. soch that the \\'ariance of the projttted data i' ma~imi,e<J (1I\",.lIing. 1933). Equi\"alemly,;t can be defined as tbe linear projection that minimi\"'. the average projttlion cost. defined as t~ mean squa.-ed distance !letween the data [>Oint< and tbeir p<ojtttioo, (Pearson, 19(1). The l\"J'\"OC\"s< of onhogonal projection i' illustraled in FiguTe 12.2. We con,ider each of these definitions in tum.",
+  "repaired_content": "Principal component analysis or PCA is a technique that is widely used for applications such as dimensionality reduction, lossy data compression, feature extraction, and data visualization (Jolliffe, 2002). It is also known as the Karhunen-Loève transform.\n\nThere are two commonly used definitions of PCA that give rise to the same algorithm. PCA can be defined as the orthogonal projection of the data onto a lower dimensional linear space, known as the principal subspace, such that the variance of the projected data is maximized (Hotelling, 1933). Equivalently, it can be defined as the linear projection that minimizes the average projection cost, defined as the mean squared distance between the data points and their projection (Pearson, 1901). The process of orthogonal projection is illustrated in Figure 12.2. We consider each of these definitions in turn.",
+  "created_at": "2026-11-19T14:11:16.876609+00:00",
+  "accepted_at": "2026-11-19T14:11:36.908575+00:00"
+}

@@ -4,11 +4,12 @@
   "doc_id": "tin-hieu-he-thong",
   "section_id": "tin-hieu-he-thong.1-5-2-minimizing-the-expected-loss",
   "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.1-5-2-minimizing-the-expected-loss.md",
-  "source_section_hash": "sha256:a837f628bf03a521c9309eadd0685e96a2f3e34269239941d18f3ff709830a6d",
-  "content_hash": "sha256:c25388bab5d72c467465d7870430043afbc50c26cf2f3aad69b73e354df0ded3",
+  "source_section_hash": "sha256:c0cfe1d2cff9cb6b9df58b3195b990f4796e57c4ccd1d513a2aded25e7ab237b",
+  "content_hash": "sha256:44c562f28af9b1b97373ebd101df79e8f91d12634fbdf87b8726a5a331c915d3",
   "includes_assets": true,
   "model": "claude-haiku-5-5",
-  "created_at": "2026-11-19T08:30:34.291693+00:00",
+  "created_at": "2026-11-20T08:15:16.756525+00:00",
   "notes": null,
+  "translated_title": "1.5.2 Giảm thiểu mất mát kỳ vọng",
   "alignment": null
 }

@@ -1,0 +1,15 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.8-4-4-the-sum-product-algorithm",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.8-4-4-the-sum-product-algorithm.md",
+  "source_section_hash": "sha256:caa9ba4f515da6f80242899a38b92318e5a1966d570041747ebda774e2822368",
+  "content_hash": "sha256:1814105b113834c8037dc5388ca12f72d6a43abac1569b4b8140dbed6716f42a",
+  "includes_assets": true,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-20T04:55:02.050932+00:00",
+  "notes": null,
+  "translated_title": "8.4.4 Thuật toán tổng-tích",
+  "alignment": null
+}

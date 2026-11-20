@@ -1,0 +1,15 @@
+{
+  "type": "translation",
+  "lang": "vi",
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.exercises-11",
+  "path": "translations/vi/tin-hieu-he-thong/tin-hieu-he-thong.exercises-11.md",
+  "source_section_hash": "sha256:29d977860edd24593593f91b6acbbd60ceea6ad4eba937a8924564c57de6b7ae",
+  "content_hash": "sha256:c18dcdfcbd1e14564b803c02343c5fd5e854c565c5d38a3e9d0b62d9450653af",
+  "includes_assets": false,
+  "model": "claude-haiku-5-5",
+  "created_at": "2026-11-19T14:06:21.659466+00:00",
+  "notes": null,
+  "translated_title": "Bài tập",
+  "alignment": null
+}

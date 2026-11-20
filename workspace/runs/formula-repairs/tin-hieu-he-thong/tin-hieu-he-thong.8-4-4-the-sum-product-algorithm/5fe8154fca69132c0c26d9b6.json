@@ -1,0 +1,11 @@
+{
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.8-4-4-the-sum-product-algorithm",
+  "kind": "formula",
+  "source_hash": "5fe8154fca69132c0c26d9b6",
+  "title": null,
+  "content": "Table 8.1 Example of a joint distribution over two binary variables for which the maximum of the joint distribution occurs for different variable values compared to the maxima of the two marginals.\n\n|  | x=0 | x=1 |\n| --- | --- | --- |\n| y=0 | 0.3 | 0.4 |\n| y=1 | 0.3 | 0.0 |\n\ncontinuous variables the summations are simply replaced by integrations. We shall give an example of the sum-product algorithm applied to a graph of linear-Gaussian variables when we consider linear dynamical systems.",
+  "repaired_content": "f ( x _ { 1 } , x _ { 2 } , x _ { 3 } ) = p ( x _ { 1 } ) p ( x _ { 2 } | x _ { 1 } ) p ( x _ { 3 } | x _ { 1 } , x _ { 2 } )",
+  "created_at": "2026-11-20T04:37:20.149752+00:00",
+  "accepted_at": null
+}

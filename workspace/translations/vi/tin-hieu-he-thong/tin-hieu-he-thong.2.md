@@ -1,1 +1,1 @@
-I'm ready to translate a section into Vietnamese. Please provide the source text you'd like me to translate, and I'll preserve all Markdown structure, headings, links, images, HTML anchors, and TeX commands exactly as specified.
+I'm ready to translate, but I don't see the source content between the markers. Could you provide the section you'd like translated to Vietnamese?

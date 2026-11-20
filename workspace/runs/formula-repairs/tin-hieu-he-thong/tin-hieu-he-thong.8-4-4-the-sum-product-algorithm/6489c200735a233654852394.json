@@ -1,0 +1,11 @@
+{
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.8-4-4-the-sum-product-algorithm",
+  "kind": "region",
+  "source_hash": "6489c200735a233654852394",
+  "title": null,
+  "content": "$$\n\n$$\n\\begin{array}{r c l} \\widetilde {p} (x _ {2}) & = & \\mu_ {f _ {a} \\to x _ {2}} (x _ {2}) \\mu_ {f _ {b} \\to x _ {2}} (x _ {2}) \\mu_ {f _ {c} \\to x _ {2}} (x _ {2}) \\\\ & = & \\left[ \\sum_ {x _ {1}} f _ {a} (x _ {1}, x _ {2}) \\right] \\left[ \\sum_ {x _ {3}} f _ {b} (x _ {2}, x _ {3}) \\right] \\left[ \\sum_ {x _ {4}} f _ {c} (x _ {2}, x _ {4}) \\right] \\\\ & = & \\sum_ {x _ {1}} \\sum_ {x _ {3}} \\sum_ {x _ {4}} f _ {a} (x _ {1}, x _ {2}) f _ {b} (x _ {2}, x _ {3}) f _ {c} (x _ {2}, x _ {4}) \\\\ & = & \\sum_ {x _ {1}} \\sum_ {x _ {3}} \\sum_ {x _ {4}} \\widetilde {p} (\\mathbf {x}) \\end{array}\\tag{8.86}\n$$\n\n$$",
+  "repaired_content": "$$\n\\begin{array}{r c l} \\widetilde {p} (x _ {2}) & = & \\mu_ {f _ {a} \\to x _ {2}} (x _ {2}) \\mu_ {f _ {b} \\to x _ {2}} (x _ {2}) \\mu_ {f _ {c} \\to x _ {2}} (x _ {2}) \\\\ & = & \\left[ \\sum_ {x _ {1}} f _ {a} (x _ {1}, x _ {2}) \\right] \\left[ \\sum_ {x _ {3}} f _ {b} (x _ {2}, x _ {3}) \\right] \\left[ \\sum_ {x _ {4}} f _ {c} (x _ {2}, x _ {4}) \\right] \\\\ & = & \\sum_ {x _ {1}} \\sum_ {x _ {3}} \\sum_ {x _ {4}} f _ {a} (x _ {1}, x _ {2}) f _ {b} (x _ {2}, x _ {3}) f _ {c} (x _ {2}, x _ {4}) \\\\ & = & \\sum_ {x _ {1}} \\sum_ {x _ {3}} \\sum_ {x _ {4}} \\widetilde {p} (\\mathbf {x}) \\end{array}\\tag{8.86}\n$$",
+  "created_at": "2026-11-20T06:24:53.444318+00:00",
+  "accepted_at": null
+}

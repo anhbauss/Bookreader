@@ -1,0 +1,10 @@
+{
+  "doc_id": "tin-hieu-he-thong",
+  "section_id": "tin-hieu-he-thong.exercises-2",
+  "kind": "formula",
+  "source_hash": "00a11702bbaa93b6f549908a",
+  "content": "\\begin{array}{c|cc} & y=0 & y=1 \\\\ \\hline x=0 & 1/3 & 1/3 \\\\ x=1 & 0 & 1/3 \\end{array}",
+  "repaired_content": "\\begin{array}{c|cc} & y=0 & y=1 \\\\ \\hline x=0 & 1/3 & 1/3 \\\\ x=1 & 0 & 1/3 \\end{array}",
+  "created_at": "2026-11-19T14:20:56.582267+00:00",
+  "accepted_at": null
+}

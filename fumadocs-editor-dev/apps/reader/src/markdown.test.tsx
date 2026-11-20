@@ -15,10 +15,20 @@ describe("MarkdownArticle math rendering", () => {
   it("typesets inline LaTeX with KaTeX", () => {
     const html = renderToStaticMarkup(<MarkdownArticle source="The value is $\\frac{1}{2}$." />);
 
-    expect(html).toContain('class="math-inline"');
+    expect(html).toContain("math-inline");
     expect(html).toContain('class="katex"');
     expect(html).toContain("frac");
     expect(html).not.toContain("math-error");
+  });
+
+  it("offers a narrowly scoped AI repair action only when KaTeX rejects a formula", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownArticle source="$$\\frac{1{2}$$" onRepairContent={async () => "\\frac{1}{2}"} />,
+    );
+
+    expect(html).toContain("math-error");
+    expect(html).toContain("Sửa công thức bằng AI");
+    expect(html).not.toContain('class="katex-display"');
   });
 
   it("typesets display LaTeX without rendering its source as a paragraph", () => {

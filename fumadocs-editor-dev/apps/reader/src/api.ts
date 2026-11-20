@@ -33,6 +33,18 @@ export interface MarkReadResult {
 
 export type TranslationStatus = "fresh" | "stale" | "untracked" | "missing" | "orphaned";
 
+export interface ContentRepair {
+  doc_id: string;
+  section_id: string;
+  kind: "formula" | "markdown" | "region";
+  source_hash: string;
+  title: string | null;
+  content: string;
+  repaired_content: string;
+  created_at: string;
+  accepted_at: string | null;
+}
+
 export interface SectionTranslation {
   lang: string;
   doc_id: string;
@@ -114,6 +126,70 @@ export function getSectionTranslation(
   if (!/^[a-z]{2,3}(?:-[a-z0-9]+)*$/i.test(language)) throw new Error("Invalid translation language");
   return request<SectionTranslation>(
     `/api/documents/${encodeURIComponent(docId)}/sections/${encodeURIComponent(sectionId)}/translations/${encodeURIComponent(language)}`,
+  );
+}
+
+export function repairSectionContent(
+  docId: string,
+  sectionId: string,
+  content: string,
+  context: string,
+  kind: "formula" | "markdown" | "region",
+): Promise<ContentRepair> {
+  requireSafe(docId, "document id");
+  requireSafe(sectionId, "section id");
+  const controller = new AbortController();
+  // Backend caps formula repair at 40 seconds and section repair at the configured
+  // provider timeout (default 120). Keep the browser deadline a little past the
+  // backend cap so a slow-but-valid provider response is not discarded first.
+  const timeoutMs = kind === "markdown" ? 140_000 : 60_000;
+  let timer: number | undefined;
+  const timedRequest = request<ContentRepair>(
+    `/api/documents/${encodeURIComponent(docId)}/sections/${encodeURIComponent(sectionId)}/formula-repairs`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, context, kind }),
+      signal: controller.signal,
+    },
+  );
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = window.setTimeout(() => {
+      controller.abort();
+      reject(new Error(kind === "markdown"
+        ? "AI không phản hồi kịp khi sửa section."
+        : "AI không phản hồi trong 60 giây khi sửa công thức."));
+    }, timeoutMs);
+  });
+  // Promise.race guarantees the reader leaves its loading state even if a browser,
+  // proxy, or gateway fails to settle an aborted fetch promise.
+  return Promise.race([timedRequest, deadline]).finally(() => {
+    if (timer !== undefined) window.clearTimeout(timer);
+  });
+}
+
+export function getAcceptedSectionRepair(docId: string, sectionId: string): Promise<ContentRepair | null> {
+  requireSafe(docId, "document id");
+  requireSafe(sectionId, "section id");
+  return request<ContentRepair | null>(
+    `/api/documents/${encodeURIComponent(docId)}/sections/${encodeURIComponent(sectionId)}/formula-repairs/accepted`,
+  );
+}
+
+export function acceptSectionRepair(
+  docId: string,
+  sectionId: string,
+  sourceHash: string,
+): Promise<ContentRepair> {
+  requireSafe(docId, "document id");
+  requireSafe(sectionId, "section id");
+  return request<ContentRepair>(
+    `/api/documents/${encodeURIComponent(docId)}/sections/${encodeURIComponent(sectionId)}/formula-repairs/accept`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_hash: sourceHash }),
+    },
   );
 }
 
