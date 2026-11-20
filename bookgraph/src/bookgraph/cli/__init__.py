@@ -21,6 +21,7 @@ from bookgraph.cli import (  # noqa: E402,F401
     llmwiki,
     mcp,
     mdx,
+    mineru_assist,
     parse,
     reading_plan,
     segment,

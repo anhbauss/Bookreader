@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "BookGraph",
+  "version": "0.1.0",
+  "identifier": "com.bookgraph.reader",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "BookGraph",
+        "width": 1680,
+        "height": 1000,
+        "minWidth": 1200,
+        "minHeight": 720,
+        "maximized": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:*; img-src 'self' asset: http://127.0.0.1:* data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$HOME/**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  }
+}

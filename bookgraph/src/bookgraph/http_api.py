@@ -33,11 +33,24 @@ _ALLOWED_IMAGE_TYPES = {
 }
 
 
-def create_app(workspace: WorkspacePaths) -> Any:
-    """Create the optional ASGI app without leaking Starlette into core service code."""
+def create_app(
+    workspace: WorkspacePaths,
+    *,
+    bearer_token: str | None = None,
+    allowed_origins: tuple[str, ...] | None = None,
+) -> Any:
+    """Create the optional ASGI app without leaking Starlette into core service code.
+
+    ``bearer_token`` is intended for a desktop host that launches this server on a
+    loopback port. It is deliberately optional so the Vite development proxy and
+    existing command-line workflow remain usable. A packaged desktop application
+    must supply a freshly generated token.
+    """
 
     try:
         from starlette.applications import Starlette
+        from starlette.middleware import Middleware
+        from starlette.middleware.base import BaseHTTPMiddleware
         from starlette.middleware.cors import CORSMiddleware
         from starlette.requests import Request
         from starlette.responses import FileResponse, JSONResponse
@@ -59,6 +72,13 @@ def create_app(workspace: WorkspacePaths) -> Any:
             return _error(JSONResponse, 404, "not_found", str(exc))
         except ReadingServiceError as exc:
             return _error(JSONResponse, 400, "service_error", str(exc))
+
+    async def authorize(request: Request, call_next: Callable[[Request], Any]) -> Any:
+        if bearer_token is not None:
+            expected = f"Bearer {bearer_token}"
+            if request.headers.get("authorization") != expected:
+                return _error(JSONResponse, 401, "unauthorized", "Authentication is required.")
+        return await call_next(request)
 
     async def documents(_request: Request) -> Any:
         return response(lambda: service.list_documents(workspace))
@@ -336,11 +356,15 @@ def create_app(workspace: WorkspacePaths) -> Any:
         Route("/api/concepts/{concept:str}", concept, methods=["GET"]),
         Route("/api/assets/{doc_id:str}/{basename:str}", asset, methods=["GET"]),
     ]
+    origins = allowed_origins or ("http://127.0.0.1:5173", "http://localhost:5173")
     return CORSMiddleware(
-        Starlette(routes=routes),
-        allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+        Starlette(
+            routes=routes,
+            middleware=[Middleware(BaseHTTPMiddleware, dispatch=authorize)],
+        ),
+        allow_origins=list(origins),
         allow_methods=["GET", "POST"],
-        allow_headers=[],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
 

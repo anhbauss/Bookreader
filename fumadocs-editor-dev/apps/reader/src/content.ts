@@ -1,3 +1,4 @@
+import { request } from "./api";
 import { assertSectionMatchesRoute, isSafeRouteSegment, validateOutline } from "./reader";
 import type { ReaderOutline, ReaderSection } from "./types";
 
@@ -39,9 +40,9 @@ export async function loadSection(docId: string, sectionId: string): Promise<Rea
   // accepted AI repair remains visible after the server or browser restarts, unlike
   // generated public MDX which is only refreshed by a separate build step.
   const canonicalId = sectionId.startsWith(`${docId}.`) ? sectionId : `${docId}.${sectionId}`;
-  const response = await fetch(`/api/documents/${encodeURIComponent(docId)}/sections/${encodeURIComponent(canonicalId)}`);
-  if (!response.ok) throw new Error(response.status === 404 ? "Section not found" : "Unable to load section");
-  const section = await response.json() as ApiSection;
+  const section = await request<ApiSection>(
+    `/api/documents/${encodeURIComponent(docId)}/sections/${encodeURIComponent(canonicalId)}`,
+  );
   return assertSectionMatchesRoute({
     title: section.title,
     bookgraph: {
@@ -61,9 +62,7 @@ export async function loadSection(docId: string, sectionId: string): Promise<Rea
 
 export async function loadDocumentTitle(docId: string): Promise<string> {
   if (!isSafeRouteSegment(docId)) throw new Error("The reader URL contains an invalid document id.");
-  const response = await fetch("/api/documents");
-  if (!response.ok) throw new Error("Unable to load document details");
-  const documents = (await response.json() as ApiDocumentList).documents;
+  const documents = (await request<ApiDocumentList>("/api/documents")).documents;
   const document = documents.find((candidate) => candidate.doc_id === docId);
   if (!document) throw new Error("Document not found");
   return document.title;
@@ -71,9 +70,7 @@ export async function loadDocumentTitle(docId: string): Promise<string> {
 
 export async function loadOutline(docId: string): Promise<ReaderOutline> {
   if (!isSafeRouteSegment(docId)) throw new Error("The reader URL contains an invalid document id.");
-  const response = await fetch(`/content/${encodeURIComponent(docId)}/outline.json`);
-  if (!response.ok) throw new Error("Unable to load table of contents");
-  return validateOutline((await response.json()) as ReaderOutline, docId);
+  return validateOutline(await request<ReaderOutline>(`/api/documents/${encodeURIComponent(docId)}/outline`), docId);
 }
 
 export function parseSection(source: string): ReaderSection {

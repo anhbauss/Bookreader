@@ -7,10 +7,10 @@ type ReaderTheme = "light" | "dark" | "paper";
 type ReaderFont = "serif" | "sans";
 type ReaderSize = "s" | "m" | "l" | "xl";
 
-type HeaderProps = { title: string; author: string; onSearch: () => void; onSettings: () => void; onPanel: () => void; onBookmark: () => void; bookmarked: boolean };
-export function ReaderHeader({ title, author, onSearch, onSettings, onPanel, onBookmark, bookmarked }: HeaderProps) {
+type HeaderProps = { title: string; author: string; onSearch: () => void; onSettings: () => void; onPanel: () => void; onBookmark: () => void; bookmarked: boolean; onLibrary: () => void };
+export function ReaderHeader({ title, author, onSearch, onSettings, onPanel, onBookmark, bookmarked, onLibrary }: HeaderProps) {
   return <header className="book-reader-header">
-    <a href="?" className="reader-library-link"><Library size={17} aria-hidden="true" /> Library</a>
+    <button type="button" className="reader-library-link" onClick={onLibrary}><Library size={17} aria-hidden="true" /> Library</button>
     <div className="reader-book-context"><span>{title}</span><small>{author}</small></div>
     <div className="reader-header-actions">
       <button type="button" aria-label="Search in this book" onClick={onSearch}><Search size={18} /></button>

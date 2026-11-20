@@ -81,7 +81,16 @@ interface ApiErrorPayload {
   message?: string;
 }
 
+type RuntimeApiConfig = { baseUrl: string; bearerToken?: string };
+
+function runtimeApiConfig(): RuntimeApiConfig | null {
+  const config = (window as Window & { __BOOKGRAPH_API__?: RuntimeApiConfig }).__BOOKGRAPH_API__;
+  return config?.baseUrl ? { baseUrl: config.baseUrl.replace(/\/$/, ""), bearerToken: config.bearerToken } : null;
+}
+
 function apiBaseUrl(): string {
+  const runtime = runtimeApiConfig();
+  if (runtime) return runtime.baseUrl;
   const configured = import.meta.env.VITE_BOOKGRAPH_API_BASE_URL?.trim();
   return configured ? configured.replace(/\/$/, "") : "";
 }
@@ -90,8 +99,11 @@ function endpoint(path: string): string {
   return `${apiBaseUrl()}${path}`;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(endpoint(path), init);
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = runtimeApiConfig()?.bearerToken;
+  const headers = new Headers(init?.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(endpoint(path), { ...init, headers });
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as ApiErrorPayload | null;
     throw new Error(payload?.message ?? `BookGraph API request failed (${response.status})`);
@@ -157,8 +169,8 @@ export function repairSectionContent(
     timer = window.setTimeout(() => {
       controller.abort();
       reject(new Error(kind === "markdown"
-        ? "AI không phản hồi kịp khi sửa section."
-        : "AI không phản hồi trong 60 giây khi sửa công thức."));
+        ? "AI did not respond in time while repairing this section."
+        : "AI did not respond within 60 seconds while repairing this formula."));
     }, timeoutMs);
   });
   // Promise.race guarantees the reader leaves its loading state even if a browser,

@@ -81,6 +81,29 @@ def test_api_allows_the_local_reader_origins(tmp_path: Path) -> None:
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
 
 
+def test_desktop_api_requires_its_runtime_bearer_token(tmp_path: Path) -> None:
+    app = create_app(
+        _workspace(tmp_path),
+        bearer_token="desktop-runtime-token",
+        allowed_origins=("tauri://localhost",),
+    )
+
+    with TestClient(app) as client:
+        rejected = client.get("/api/documents")
+        accepted = client.get(
+            "/api/documents",
+            headers={
+                "Authorization": "Bearer desktop-runtime-token",
+                "Origin": "tauri://localhost",
+            },
+        )
+
+    assert rejected.status_code == 401
+    assert rejected.json() == {"error": "unauthorized", "message": "Authentication is required."}
+    assert accepted.status_code == 200
+    assert accepted.headers["access-control-allow-origin"] == "tauri://localhost"
+
+
 def test_invalid_ids_and_missing_sections_have_safe_http_errors(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     app = create_app(workspace)

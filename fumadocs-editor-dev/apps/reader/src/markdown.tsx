@@ -74,7 +74,7 @@ function Math({
     setRepairError(null);
     const hardDeadline = window.setTimeout(() => {
       setRepairState((current) => current === "repairing" ? "failed" : current);
-      setRepairError((current) => current ?? "Không gửi được yêu cầu sửa công thức tới backend.");
+      setRepairError((current) => current ?? "Unable to send the formula repair request to the backend.");
     }, 62_000);
     void repairHandler.repair(unit, repairHandler.contextFor(unit), repairKind)
       .then((repaired) => {
@@ -90,7 +90,7 @@ function Math({
       .catch((reason: unknown) => {
         window.clearTimeout(hardDeadline);
         setRepairState("failed");
-        setRepairError(reason instanceof Error ? reason.message : "Không thể sửa công thức này.");
+        setRepairError(reason instanceof Error ? reason.message : "Unable to repair this formula.");
       });
   } : undefined;
   const openRepairMenu = repairHandler ? (event: ReactMouseEvent<HTMLElement>) => {
@@ -104,7 +104,7 @@ function Math({
       <code className="math-error">{expression}</code>
       {repairVisible && requestRepair && <div className="math-repair-menu math-repair-menu-visible" role="menu">
         <button type="button" role="menuitem" disabled={repairState === "repairing"} onClick={requestRepair}>
-          {repairState === "repairing" ? "Đang sửa công thức…" : repairState === "failed" ? "Thử sửa lại bằng AI" : "Sửa công thức bằng AI"}
+          {repairState === "repairing" ? "Repairing formula…" : repairState === "failed" ? "Try AI repair again" : "Repair formula with AI"}
         </button>
         {repairError && <small className="math-repair-error">{repairError}</small>}
       </div>}
@@ -169,7 +169,7 @@ function DisplayMath({
       {equationTag && <span className="math-equation-tag" aria-label={`Equation ${equationTag}`}>({equationTag})</span>}
       {repairMenuOpen && onRepair && <div className="math-repair-menu" role="menu">
         <button type="button" role="menuitem" disabled={repairState === "repairing"} onClick={onRepair}>
-          {repairState === "repairing" ? "Đang sửa công thức…" : repairState === "failed" ? "Thử sửa lại bằng AI" : "Sửa công thức bằng AI"}
+          {repairState === "repairing" ? "Repairing formula…" : repairState === "failed" ? "Try AI repair again" : "Repair formula with AI"}
         </button>
       </div>}
       {scrollState.overflow && <button type="button" className="math-scroll-button math-scroll-next" aria-label="Show later part of formula" disabled={scrollState.atEnd} onClick={() => scrollFormula(1)}>›</button>}

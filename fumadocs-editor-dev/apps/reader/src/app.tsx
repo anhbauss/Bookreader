@@ -23,6 +23,8 @@ import { canonicalSectionId, sectionUrl, validateReaderRoute } from "./reader";
 import { CoveragePanel, ReadingModePicker, TranslationContent } from "./translation-panel";
 import { canShowTranslation, isSectionInsideCoverage, resolveReadingMode, type ReadingMode, type TranslationCoverageState, type TranslationState } from "./translation";
 import { LibraryPage } from "./library/library-page";
+import { desktopApi, isDesktopApp } from "./desktop";
+import { Onboarding, useDesktopBootstrap } from "./onboarding";
 import { ReaderDrawer, ReaderHeader, SearchModal, useReaderPreferences, VisualSettingsPopover } from "./reader-experience";
 import type { ReaderOutline, ReaderSection } from "./types";
 
@@ -123,7 +125,57 @@ function splitParagraphAtReadingMidpoint(source: string, midpoint = source.lengt
 }
 
 export function App() {
-  if (!window.location.search) return <LibraryPage />;
+  const bootstrap = useDesktopBootstrap();
+  const [routeKey, setRouteKey] = useState(() => window.location.search);
+  useEffect(() => {
+    const onPopState = () => setRouteKey(window.location.search);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  if (bootstrap.error) return <State title="Unable to open BookGraph" message={bootstrap.error} />;
+  if (!bootstrap.state) return <State title="Opening BookGraph" message="Loading your local reading space…" />;
+  if (isDesktopApp() && (!bootstrap.state.settings.onboardingCompleted || !bootstrap.state.settings.libraryRoot)) {
+    return <Onboarding
+      initialSettings={bootstrap.state.settings}
+      initialCredential={bootstrap.state.credential}
+      onComplete={() => window.location.reload()}
+    />;
+  }
+  if (!routeKey) {
+    if (!isDesktopApp()) return <LegacyLibraryPage />;
+    return <LibraryPage
+      settings={bootstrap.state.settings}
+      onSettingsChanged={() => window.location.reload()}
+      onOpenBook={({ docId, sectionId }) => navigate(docId, sectionId)}
+    />;
+  }
+  return <ReaderApp onBackToLibrary={() => {
+    void desktopApi().backToLibrary().finally(() => {
+      window.history.pushState({}, "", window.location.pathname);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+  }} />;
+}
+
+function LegacyLibraryPage() {
+  return <LibraryPage
+    settings={{
+      version: 1,
+      onboardingCompleted: true,
+      displayName: "Reader",
+      provider: "openai-compatible",
+      providerBaseUrl: "",
+      model: "",
+      targetLanguage: "vi",
+      profileImagePath: null,
+      libraryRoot: ".",
+    }}
+    onSettingsChanged={() => {}}
+    onOpenBook={({ docId, sectionId }) => navigate(docId, sectionId)}
+  />;
+}
+
+function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
   const [location, setLocation] = useState(route);
   const [section, setSection] = useState<ReaderSection | null>(null);
   const [bookTitle, setBookTitle] = useState<string | null>(null);
@@ -322,7 +374,7 @@ export function App() {
             setTranslationState({ status: "ready", translation, error: null });
             setTranslationAction("idle");
           } else if (coverage.status === "failed") {
-            setTranslationState({ status: "error", translation: null, error: "Không thể dịch lại section này. Hãy thử lại sau." });
+            setTranslationState({ status: "error", translation: null, error: "Unable to retranslate this section. Please try again later." });
             setTranslationAction("idle");
           } else {
             window.setTimeout(waitForTranslation, 1200);
@@ -360,7 +412,7 @@ export function App() {
       })
       .catch((reason: unknown) => {
         setSectionRepairAction("failed");
-        setSectionRepairError(reason instanceof Error ? reason.message : "Không thể sửa section này.");
+        setSectionRepairError(reason instanceof Error ? reason.message : "Unable to repair this section.");
       });
   };
   const undoSectionRepair = () => {
@@ -398,7 +450,7 @@ export function App() {
       })
       .catch((reason: unknown) => {
         setSectionRepairSaveState("failed");
-        setSectionRepairError(reason instanceof Error ? reason.message : "Không thể lưu bản sửa.");
+        setSectionRepairError(reason instanceof Error ? reason.message : "Unable to save the repair.");
       });
   };
   const onMarkRead = () => {
@@ -426,7 +478,7 @@ export function App() {
   const [firstPage, secondPage] = useMemo(() => splitSequentialPages(readerSource), [readerSource]);
   return (
     <div className={`reader-shell reader-experience reader-font-${preferences.font} reader-size-${preferences.size} reader-mode-${mode} ${(mode !== "bilingual" && preferences.vertical) ? "reader-vertical" : ""}`} data-reader-theme={preferences.theme}>
-      <ReaderHeader title={bookTitle ?? location.docId ?? "Book Reader"} author="Alan V. Oppenheim" onSearch={() => setSearchOpen(true)} onSettings={() => setSettingsOpen((value) => !value)} onPanel={() => setDrawerOpen(true)} onBookmark={() => setBookmarked((value) => !value)} bookmarked={bookmarked} />
+      <ReaderHeader title={bookTitle ?? location.docId ?? "Book Reader"} author="Alan V. Oppenheim" onSearch={() => setSearchOpen(true)} onSettings={() => setSettingsOpen((value) => !value)} onPanel={() => setDrawerOpen(true)} onBookmark={() => setBookmarked((value) => !value)} bookmarked={bookmarked} onLibrary={onBackToLibrary} />
       {settingsOpen && <div className="visual-settings-anchor"><VisualSettingsPopover theme={preferences.theme} font={preferences.font} size={preferences.size} vertical={preferences.vertical} showVertical={mode !== "bilingual"} onTheme={preferences.setTheme} onFont={preferences.setFont} onSize={preferences.setSize} onVertical={preferences.setVertical} /></div>}
       {searchOpen && <SearchModal source={readerSource} onClose={() => setSearchOpen(false)} onResult={(id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" })} />}
       <ReaderDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} mode={mode} onMode={changeMode}><aside className="toc" aria-label="Table of contents"><div className="toc-heading"><span>Contents</span></div>{tree.map((node) => <button key={node.id} className={`toc-item level-${Math.min(node.level, 4)} ${node.id === currentId ? "active" : ""}`} onClick={() => go(node.id)}>{node.title}</button>)}</aside></ReaderDrawer>
@@ -436,8 +488,10 @@ export function App() {
           <h1>{repairedTitle ?? section.title}</h1>
           {section.description && <p className="description">{section.description}</p>}
           {mode === "translation" ? <TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} className={preferences.vertical ? "reader-prose reader-paged-prose translation-vertical-columns" : "reader-prose reader-paged-prose"} articleClassName={preferences.vertical ? "translation-vertical-content" : undefined} onRepairContent={repairCurrentContent} contentOverride={repairedTranslation} /> : mode === "bilingual" ? <>
-            <CoveragePanel state={coverageState} action={translationAction} onStart={startCoverage} />
-            {showTranslationAction && <section className="translation-retry" aria-label="Translate this section"><div><strong>Translation unavailable</strong><span>This section has no usable Vietnamese yet.</span></div><button type="button" disabled={translationAction !== "idle"} onClick={requestCurrentTranslation}>{translationAction === "next" ? "Translating…" : "Translate this section"}</button></section>}
+            <div className="bilingual-status-row">
+              <CoveragePanel state={coverageState} action={translationAction} onStart={startCoverage} />
+              {showTranslationAction && <section className="translation-retry" aria-label="Translate this section"><div><strong>Translation unavailable</strong><span>This section has no usable Vietnamese yet.</span></div><button type="button" disabled={translationAction !== "idle"} onClick={requestCurrentTranslation}>{translationAction === "next" ? "Translating…" : "Translate this section"}</button></section>}
+            </div>
             <div className="bilingual"><section><div className="language-label">Original</div><h2 className="original-section-title">{repairedTitle ?? section.title}</h2><MarkdownArticle source={resolveBookGraphImageLinks(repairedOriginal ?? section.body, location.docId)} onRepairContent={repairCurrentContent} /></section><section><div className="language-label">Vietnamese</div><h2 className="translation-section-title">{translationState.translation?.translated_title ?? section.title}</h2><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} onRepairContent={repairCurrentContent} contentOverride={repairedTranslation} /></section></div>
           </> : preferences.vertical ? <MarkdownArticle source={readerSource} className="reader-prose reader-paged-prose original-vertical-columns" onRepairContent={repairCurrentContent} /> : <MarkdownArticle source={readerSource} className="reader-prose reader-paged-prose" onRepairContent={repairCurrentContent} />}
           <nav className="section-navigation reader-pagination" aria-label="Section navigation">
@@ -445,20 +499,20 @@ export function App() {
             <button disabled={!section.bookgraph.next_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.next_id)}>Next Page <ChevronRight size={18} /></button>
           </nav>
           {mode !== "translation" && <section className="formula-repair-section" aria-label="Content rendering repair tools">
-            <div><strong>Nội dung hiển thị lỗi?</strong><span>AI sẽ đọc và sửa toàn bộ section đang xem, bao gồm cả chữ, Markdown và công thức.</span>{sectionRepairError && <small className="content-repair-error">{sectionRepairError}</small>}</div>
+            <div><strong>Is the content rendering incorrectly?</strong><span>AI will review and repair the current section, including text, Markdown, and formulas.</span>{sectionRepairError && <small className="content-repair-error">{sectionRepairError}</small>}</div>
             <div className="content-repair-actions">
               <button type="button" disabled={sectionRepairAction === "repairing" || sectionRepairSaveState === "saved"} onClick={repairEntireSection}>
-                {sectionRepairAction === "repairing" ? "Đang sửa section…" : sectionRepairAction === "failed" ? "Thử sửa lại section" : "Sửa section bằng AI"}
+                {sectionRepairAction === "repairing" ? "Repairing section…" : sectionRepairAction === "failed" ? "Try section repair again" : "Repair section with AI"}
               </button>
               {sectionRepairCandidate && sectionRepairSaveState !== "saved" && <button type="button" className="secondary" onClick={undoSectionRepair}>Undo</button>}
               {sectionRepairCandidate && <button type="button" className="save" disabled={sectionRepairSaveState === "saving" || sectionRepairSaveState === "saved"} onClick={saveSectionRepair}>
-                {sectionRepairSaveState === "saving" ? "Đang lưu…" : sectionRepairSaveState === "saved" ? "Đã lưu" : sectionRepairSaveState === "failed" ? "Lưu lại" : "Save"}
+                {sectionRepairSaveState === "saving" ? "Saving…" : sectionRepairSaveState === "saved" ? "Saved" : sectionRepairSaveState === "failed" ? "Save again" : "Save"}
               </button>}
             </div>
           </section>}
           {(mode === "translation" || mode === "bilingual") && <section className="translation-retranslate" aria-label="Retranslate this section">
-            <div><strong>Bản dịch có lỗi?</strong><span>Dịch lại section này để thay thế bản dịch Vietnamese hiện tại.</span></div>
-            <button type="button" disabled={translationAction !== "idle"} onClick={requestCurrentTranslation}>{translationAction === "next" ? "Đang dịch lại…" : "Dịch lại section"}</button>
+            <div><strong>Is the translation incorrect?</strong><span>Retranslate this section to replace the current Vietnamese translation.</span></div>
+            <button type="button" disabled={translationAction !== "idle"} onClick={requestCurrentTranslation}>{translationAction === "next" ? "Retranslating…" : "Retranslate section"}</button>
           </section>}
         </article>}
       </main>
