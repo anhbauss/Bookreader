@@ -527,6 +527,18 @@ fn reader_command(workspace: &Path, settings: &AppSettings, api_key: &str, port:
     command
 }
 
+fn stop_reader(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .creation_flags(0x08000000).status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 fn start_reader_server(workspace: &Path, state: &DesktopState, settings: &AppSettings) -> Result<String, String> {
     let api_key = credential_entry()?.get_password()
         .map_err(|error| match error {
@@ -539,8 +551,7 @@ fn start_reader_server(workspace: &Path, state: &DesktopState, settings: &AppSet
 
     let mut server = state.reader_server.lock().map_err(|_| "Unable to access reader server state.".to_owned())?;
     if let Some(mut existing) = server.take() {
-        let _ = existing.kill();
-        let _ = existing.wait();
+        stop_reader(&mut existing);
     }
     // Each desktop instance owns its endpoint instead of reusing an unrelated
     // server on port 8000 that may have a different workspace or no credential.
@@ -551,7 +562,7 @@ fn start_reader_server(workspace: &Path, state: &DesktopState, settings: &AppSet
     let base_url = format!("http://{address}");
     let mut child = reader_command(workspace, settings, &api_key, address.port())
         .spawn().map_err(|error| format!("Unable to start the local BookGraph reader service: {error}"))?;
-    for _ in 0..120 {
+    for _ in 0..300 {
         if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
             return Err(format!("The local BookGraph reader service exited before it was ready ({status})."));
         }
@@ -562,8 +573,7 @@ fn start_reader_server(workspace: &Path, state: &DesktopState, settings: &AppSet
         }
         thread::sleep(Duration::from_millis(100));
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    stop_reader(&mut child);
     Err("The local BookGraph reader service did not start in time.".to_owned())
 }
 
@@ -581,7 +591,7 @@ fn back_to_library(state: State<DesktopState>) {
     if let Ok(mut url) = state.reader_base_url.lock() { *url = None; }
     if let Ok(mut server) = state.reader_server.lock() {
         if let Some(mut child) = server.take() {
-            let _ = child.kill();
+            stop_reader(&mut child);
         }
     }
 }
@@ -592,8 +602,13 @@ fn main() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(DesktopState::default())
         .invoke_handler(tauri::generate_handler![get_reader_api_base_url, get_app_settings, save_app_settings, get_credential_status, save_translation_api_key, delete_translation_api_key, select_profile_image, select_book_pdf, select_library_root, prepare_mineru_book, get_mineru_workspace_info, open_mineru_web, open_local_folder, organize_mineru_results, create_library_folder, scan_library, remove_book, enrich_book_metadata, open_book, back_to_library])
-        .run(tauri::generate_context!())
-        .expect("error while running BookGraph desktop application");
+        .build(tauri::generate_context!())
+        .expect("error while building BookGraph desktop application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                back_to_library(app.state::<DesktopState>());
+            }
+        });
 }
 
 #[cfg(test)]
