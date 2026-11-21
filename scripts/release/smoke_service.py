@@ -51,7 +51,15 @@ with tempfile.TemporaryDirectory(prefix="bookgraph-release-check-") as temp:
         else:
             raise RuntimeError("Frozen HTTP server did not become ready")
     finally:
-        server.terminate()
+        if os.name == "nt":
+            taskkill = Path(os.environ["SystemRoot"]) / "System32" / "taskkill.exe"
+            subprocess.run(
+                [str(taskkill), "/PID", str(server.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+            )
+        else:
+            server.terminate()
         try:
             server.wait(timeout=10)
         except subprocess.TimeoutExpired:
