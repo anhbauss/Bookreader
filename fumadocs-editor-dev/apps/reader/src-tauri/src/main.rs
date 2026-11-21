@@ -303,7 +303,9 @@ async fn select_profile_image(app: AppHandle) -> Result<Option<String>, String> 
 
 #[tauri::command]
 async fn select_book_pdf(app: AppHandle) -> Result<Option<String>, String> {
-    let selected = app.dialog().file().add_filter("PDF", &["pdf"]).blocking_pick_file();
+    let selected = app.dialog().file()
+        .set_directory(default_dialog_directory(&app)?)
+        .add_filter("PDF", &["pdf"]).blocking_pick_file();
     let Some(path) = selected else { return Ok(None); };
     let selected_path = path.as_path().ok_or_else(|| "Selected PDF path is unavailable.".to_owned())?;
     let canonical = selected_path.canonicalize().map_err(|_| "Selected PDF is no longer accessible.".to_owned())?;
@@ -315,11 +317,19 @@ async fn select_book_pdf(app: AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command]
 async fn select_library_root(app: AppHandle) -> Result<Option<String>, String> {
-    let selected = app.dialog().file().blocking_pick_folder();
+    let selected = app.dialog().file()
+        .set_directory(default_dialog_directory(&app)?)
+        .blocking_pick_folder();
     let Some(path) = selected else { return Ok(None); };
     let selected_path = path.as_path().ok_or_else(|| "Selected folder path is unavailable.".to_owned())?;
     let canonical = canonical_directory(selected_path)?;
     Ok(Some(canonical.to_string_lossy().into_owned()))
+}
+
+fn default_dialog_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path().document_dir().ok().filter(|path| path.is_dir())
+        .or_else(|| app.path().home_dir().ok().filter(|path| path.is_dir()))
+        .ok_or_else(|| "Unable to locate your Documents or Home folder.".to_owned())
 }
 
 /// Installed builds use the bundled service and never depend on the developer checkout.
