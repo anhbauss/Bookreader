@@ -1,3 +1,4 @@
+import { BookGraphBrand } from "./bookgraph-brand";
 import { BookOpen, Camera, FolderOpen, KeyRound, LoaderCircle, Plus, UserRound, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { desktopApi, localFileUrl, type AppSettings, type CredentialStatus, type TranslationProvider } from "./desktop";
@@ -107,7 +108,7 @@ export function Onboarding({ initialSettings, initialCredential, onComplete }: {
 
   return <main className="onboarding-page">
     <section className="onboarding-card" aria-labelledby="onboarding-title">
-      <div className="onboarding-brand"><BookOpen size={24} /><span>BookGraph</span></div>
+      <div className="onboarding-brand"><BookGraphBrand /></div>
       <div className="onboarding-steps" aria-label="Setup progress"><i className={step === "profile" ? "active" : "done"} /><i className={step === "avatar" ? "active" : step === "library" ? "done" : ""} /><i className={step === "library" ? "active" : ""} /></div>
       {step === "profile" ? <>
         <p className="onboarding-kicker">SIGN IN</p>

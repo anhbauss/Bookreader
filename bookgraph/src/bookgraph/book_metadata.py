@@ -8,8 +8,6 @@ import json
 import logging
 import os
 import re
-import shutil
-import subprocess
 import tempfile
 import unicodedata
 import uuid
@@ -21,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from bookgraph.mcp.errors import ReadingServiceError
 from bookgraph.reading_plans import plan_lock
+from bookgraph.pdf_cover_images import crop_cover, render_front_pages
 from bookgraph.translation_provider import TranslationProviderConfig, configured_provider
 from bookgraph.workspace import WorkspacePaths
 
@@ -305,13 +304,7 @@ def enrich_book_metadata(
             if pdf is not None:
                 try:
                     with tempfile.TemporaryDirectory(prefix="bookgraph-cover-") as temp:
-                        prefix = str(Path(temp) / "page")
-                        subprocess.run(
-                            ["pdftoppm", "-f", "1", "-l", "5", "-scale-to", "1200",
-                             "-jpeg", "-jpegopt", "quality=80", str(pdf), prefix],
-                            check=True, capture_output=True, timeout=60,
-                        )
-                        pages = sorted(Path(temp).glob("page-*.jpg"))
+                        pages = render_front_pages(pdf, Path(temp))
                         candidates = [
                             {"candidate_id": str(i), "image_mime_type": "image/jpeg",
                              "image_base64": base64.b64encode(path.read_bytes()).decode("ascii")}
@@ -336,35 +329,14 @@ def enrich_book_metadata(
                         if selected_id is not None:
                             selected = pages[int(selected_id)]
                             crop = result["crop"]
-                            geometry = subprocess.run(
-                                ["identify", "-format", "%w %h", str(selected)],
-                                check=True, capture_output=True, text=True, timeout=10,
-                            ).stdout.split()
-                            width, height = map(int, geometry)
-                            left, top, right, bottom = crop
-                            x, y = round(width * left / 1000), round(height * top / 1000)
-                            w = max(1, round(width * right / 1000) - x)
-                            h = max(1, round(height * bottom / 1000) - y)
                             output = workspace.root / "metadata" / "ai-pdf-cover.jpg"
-                            output.parent.mkdir(parents=True, exist_ok=True)
-                            temporary = Path(temp) / "cropped.jpg"
-                            subprocess.run(
-                                ["convert", str(selected), "-crop", f"{w}x{h}+{x}+{y}",
-                                 "+repage", str(temporary)],
-                                check=True, capture_output=True, timeout=30,
-                            )
-                            staged = output.with_name(f".{uuid.uuid4().hex}.tmp")
-                            try:
-                                shutil.copyfile(temporary, staged)
-                                os.replace(staged, output)
-                            finally:
-                                staged.unlink(missing_ok=True)
+                            crop_cover(selected, output, crop)
                             metadata.cover_path = output.relative_to(workspace.root).as_posix()
                             metadata.cover_status = "selected"
                         else:
                             metadata.cover_status = "no_match"
                         metadata.cover_review_version = 3
-                except (ReadingServiceError, OSError, subprocess.SubprocessError, ValueError,
+                except (ReadingServiceError, OSError, ImportError, ValueError,
                         IndexError, KeyError) as exc:
                     metadata.cover_path = None
                     metadata.cover_status = "failed"

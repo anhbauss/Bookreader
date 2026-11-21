@@ -1,0 +1,37 @@
+BOOKGRAPH 0.1.0
+
+WINDOWS 10/11 — 64 BIT
+Mở file BookGraph_0.1.0_x64-setup.exe, chọn Install.
+Sau khi cài, mở BookGraph từ Start Menu. Không cần cài Python, Node hay uv.
+Nếu máy chưa có WebView2, bộ cài sẽ tự tải và cài thành phần này (cần Internet).
+Bản đầu chưa ký số, Windows có thể hiển thị tên nhà phát hành chưa xác định.
+
+LINUX — UBUNTU 24.04 TRỞ LÊN, x86_64
+Mở file BookGraph_0.1.0_amd64.deb bằng trình cài phần mềm.
+Chọn Install/Cài đặt, sau đó mở BookGraph từ menu ứng dụng.
+AppImage tự đăng ký biểu tượng trong menu ứng dụng và Dock khi mở lần đầu.
+AppImage là bản chạy di động: cho phép thực thi file trong Properties rồi mở file.
+Nếu máy thiếu FUSE, nên dùng bản .deb để cài qua trình quản lý phần mềm.
+
+Hộp thoại chọn PDF và thư viện mặc định mở Documents của tài khoản hiện tại;
+nếu Documents không tồn tại thì mở Home.
+
+SỬ DỤNG LẦN ĐẦU
+1. Chọn một thư mục để lưu thư viện sách.
+2. Nhập thông tin API AI của chính bạn trong Settings.
+3. Chọn Add a book và chọn PDF. AI dùng các trang đầu để nhận diện tên, tác giả, bìa.
+4. Với sách chưa phân tích, chọn Parse document, mở MinerU Web bằng nút trong cửa sổ,
+   tải các PDF được chia sẵn lên, tải kết quả về thư mục Download đã chỉ định,
+   rồi chọn I added all MinerU results để hoàn tất.
+
+Sách và cài đặt được lưu tại máy của người dùng. Bộ cài không chứa sách hay API key.
+Mạng cần thiết khi dùng API AI, MinerU Web hoặc tải thành phần hệ thống còn thiếu.
+
+KIỂM TRA BẢN BUILD
+Cả bản Windows và Linux đã qua kiểm tra dịch vụ PDF độc lập, HTTP API,
+và kiểm tra dịch vụ từ thư mục sau khi cài. Bản Linux cũng đã mở giao diện
+với cài đặt mới trên máy phát triển. Chưa kiểm thử toàn bộ thao tác giao diện
+trên mọi cấu hình máy Windows.
+
+Mã nguồn bản đóng gói: https://github.com/anhbauss/Bookreader/tree/release/desktop-0.1.0
+Kết quả build: https://github.com/anhbauss/Bookreader/actions/runs/44900426513

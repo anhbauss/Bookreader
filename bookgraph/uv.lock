@@ -284,6 +284,11 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+desktop = [
+    { name = "pillow" },
+    { name = "pypdf" },
+    { name = "pypdfium2" },
+]
 dev = [
     { name = "mypy" },
     { name = "pytest" },
@@ -306,7 +311,9 @@ mineru-torch = [
 ]
 parsers = [
     { name = "markitdown", extra = ["docx"] },
+    { name = "pillow" },
     { name = "pypdf" },
+    { name = "pypdfium2" },
 ]
 pdf = [
     { name = "weasyprint" },
@@ -325,9 +332,14 @@ requires-dist = [
     { name = "mineru", marker = "extra == 'mineru'", specifier = ">=4.0.10,<5" },
     { name = "mineru", extras = ["torch"], marker = "extra == 'mineru-torch'", specifier = ">=4.0.10,<5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "pillow", marker = "extra == 'desktop'", specifier = ">=11" },
+    { name = "pillow", marker = "extra == 'parsers'", specifier = ">=11" },
     { name = "playwright", marker = "extra == 'pdf-chromium'", specifier = ">=1.40" },
     { name = "pydantic", specifier = ">=2.7" },
+    { name = "pypdf", marker = "extra == 'desktop'", specifier = ">=4.0" },
     { name = "pypdf", marker = "extra == 'parsers'", specifier = ">=4.0" },
+    { name = "pypdfium2", marker = "extra == 'desktop'", specifier = ">=4.30" },
+    { name = "pypdfium2", marker = "extra == 'parsers'", specifier = ">=4.30" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "rich", specifier = ">=13.7" },

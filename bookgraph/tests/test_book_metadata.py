@@ -114,7 +114,7 @@ def test_pdf_cover_uses_local_rendering_and_rejects_paths_outside_workspace(tmp_
             }
         )
     )
-    with patch("bookgraph.book_metadata.subprocess.run") as run:
+    with patch("bookgraph.book_metadata.render_front_pages") as run:
         enrich_book_metadata(root)
     run.assert_not_called()
 
@@ -136,19 +136,26 @@ def test_rendered_cover_is_saved_in_workspace_and_exposed_as_a_relative_path(
         )
     )
 
-    def render(args: list[str], **kwargs: object) -> MagicMock:
-        Path(args[-1] + ".jpg").write_bytes(b"local cover")
-        return MagicMock(returncode=0)
+    from PIL import Image
 
+    page = tmp_path / "spread.jpg"
+    Image.new("RGB", (1000, 600), "red").save(page)
+    provider = MagicMock()
+    provider.extract_book_metadata.return_value = {
+        "title": "Real Book Title", "authors": ["Jane Doe"], "editors": [],
+        "publisher": None, "publication_year": None,
+    }
+    provider.choose_book_cover.return_value = {"candidate_id": "0", "crop": [500, 0, 1000, 1000]}
     with (
         patch("bookgraph.book_metadata._pdf_evidence", return_value=("", None, [])),
-        patch("bookgraph.book_metadata.shutil.which", return_value="/usr/bin/pdftoppm"),
-        patch("bookgraph.book_metadata.subprocess.run", side_effect=render) as run,
+        patch("bookgraph.book_metadata.configured_provider", return_value=provider),
+        patch("bookgraph.book_metadata.render_front_pages", return_value=[page]),
     ):
-        value = enrich_book_metadata(root)
-    assert value.cover_path == "metadata/cover.jpg"
-    assert (root.root / value.cover_path).is_file()
-    assert "-singlefile" in run.call_args.args[0] and "-f" in run.call_args.args[0]
+        value = enrich_book_metadata(root, use_ai=True)
+    assert value.cover_path == "metadata/ai-pdf-cover.jpg"
+    with Image.open(root.root / value.cover_path) as image:
+        assert image.size == (500, 600)
+    assert value.cover_status == "selected"
 
 
 def test_reader_documents_use_the_same_title_and_authors_as_the_library(tmp_path: Path) -> None:
@@ -207,14 +214,9 @@ def test_refresh_failure_does_not_erase_verified_names(tmp_path: Path) -> None:
     assert failed.authors == ["Jane Doe"] and failed.title == "Real Book Title"
 
 
-def test_cover_refresh_failure_keeps_the_previous_local_cover(tmp_path: Path) -> None:
+def test_local_refresh_never_invents_a_cover_without_ai(tmp_path: Path) -> None:
     root = workspace(tmp_path)
-    cover = root.root / "metadata" / "cover.jpg"
-    cover.parent.mkdir()
-    cover.write_bytes(b"existing cover")
-    with patch("bookgraph.book_metadata._render_cover", return_value="metadata/cover.jpg"):
-        enrich_book_metadata(root)
-    with patch("bookgraph.book_metadata._render_cover", return_value=None):
-        refreshed = enrich_book_metadata(root, force=True)
-    assert refreshed.cover_path == "metadata/cover.jpg"
-    assert cover.read_bytes() == b"existing cover"
+    with patch("bookgraph.book_metadata.render_front_pages") as render:
+        value = enrich_book_metadata(root, force=True)
+    assert value.cover_path is None
+    render.assert_not_called()

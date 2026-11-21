@@ -1,0 +1,6 @@
+.bookgraph-brand { display: inline-flex; align-items: center; gap: 10px; color: #1f4d3a; white-space: nowrap; }
+.bookgraph-brand > img { display: block; width: 32px; height: 28px; flex-shrink: 0; }
+.bookgraph-brand > span { font-family: "Fraunces Variable", Georgia, serif; font-size: 24px; font-weight: 600; line-height: 1; letter-spacing: -.02em; }
+.onboarding-brand .bookgraph-brand { gap: 13px; }
+.onboarding-brand .bookgraph-brand > img { width: 40px; height: 35px; }
+.onboarding-brand .bookgraph-brand > span { font-size: 30px; }

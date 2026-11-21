@@ -1,0 +1,13 @@
+/build/
+/releases/
+/fumadocs-editor-dev/apps/reader/src-tauri/binaries/
+/fumadocs-editor-dev/apps/reader/src-tauri/target/
+/fumadocs-editor-dev/apps/reader/dist/
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+
+# Desktop installers are distributed separately from source code.
+/Bo-cai-BookGraph-0.1.0/*.AppImage
+/Bo-cai-BookGraph-0.1.0/*.deb
+/Bo-cai-BookGraph-0.1.0/*.exe

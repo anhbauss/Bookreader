@@ -1,4 +1,4 @@
-import { Bookmark, Library, List, PanelRight, Search, Settings2, X } from "lucide-react";
+import { Bookmark, List, PanelRight, Search, Settings2, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ReadingMode } from "./translation";
 import "./reader-experience.css";
@@ -10,7 +10,7 @@ type ReaderSize = "s" | "m" | "l" | "xl";
 type HeaderProps = { title: string; author: string; onSearch: () => void; onSettings: () => void; onPanel: () => void; onBookmark: () => void; bookmarked: boolean; onLibrary: () => void; insightsOpen: boolean; onInsights: () => void };
 export function ReaderHeader({ title, author, onSearch, onSettings, onPanel, onBookmark, bookmarked, onLibrary, insightsOpen, onInsights }: HeaderProps) {
   return <header className="book-reader-header">
-    <button type="button" className="reader-library-link" onClick={onLibrary}><Library size={17} aria-hidden="true" /> Library</button>
+    <button type="button" className="reader-library-link" onClick={onLibrary}><img src="/bookgraph-icon.svg" width={24} height={24} alt="" aria-hidden="true" /> Library</button>
     <div className="reader-book-context"><span>{title}</span>{author && <small>{author}</small>}</div>
     <div className="reader-header-actions">
       <button type="button" aria-label="Search in this book" onClick={onSearch}><Search size={18} /></button>

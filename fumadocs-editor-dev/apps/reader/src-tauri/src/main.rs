@@ -303,7 +303,9 @@ async fn select_profile_image(app: AppHandle) -> Result<Option<String>, String> 
 
 #[tauri::command]
 async fn select_book_pdf(app: AppHandle) -> Result<Option<String>, String> {
-    let selected = app.dialog().file().add_filter("PDF", &["pdf"]).blocking_pick_file();
+    let selected = app.dialog().file()
+        .set_directory(default_dialog_directory(&app)?)
+        .add_filter("PDF", &["pdf"]).blocking_pick_file();
     let Some(path) = selected else { return Ok(None); };
     let selected_path = path.as_path().ok_or_else(|| "Selected PDF path is unavailable.".to_owned())?;
     let canonical = selected_path.canonicalize().map_err(|_| "Selected PDF is no longer accessible.".to_owned())?;
@@ -315,22 +317,48 @@ async fn select_book_pdf(app: AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command]
 async fn select_library_root(app: AppHandle) -> Result<Option<String>, String> {
-    let selected = app.dialog().file().blocking_pick_folder();
+    let selected = app.dialog().file()
+        .set_directory(default_dialog_directory(&app)?)
+        .blocking_pick_folder();
     let Some(path) = selected else { return Ok(None); };
     let selected_path = path.as_path().ok_or_else(|| "Selected folder path is unavailable.".to_owned())?;
     let canonical = canonical_directory(selected_path)?;
     Ok(Some(canonical.to_string_lossy().into_owned()))
 }
 
+fn default_dialog_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path().document_dir().ok().filter(|path| path.is_dir())
+        .or_else(|| app.path().home_dir().ok().filter(|path| path.is_dir()))
+        .ok_or_else(|| "Unable to locate your Documents or Home folder.".to_owned())
+}
+
+/// Installed builds use the bundled service and never depend on the developer checkout.
+fn bookgraph_command() -> Command {
+    #[cfg(not(debug_assertions))]
+    {
+        let executable = std::env::current_exe().expect("Application executable is unavailable");
+        let name = if cfg!(windows) { "bookgraph-service.exe" } else { "bookgraph-service" };
+        #[allow(unused_mut)]
+        let mut command = Command::new(executable.with_file_name(name));
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // Keep the local service console hidden.
+        }
+        command
+    }
+    #[cfg(debug_assertions)]
+    {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../bookgraph");
+        let mut command = Command::new("uv");
+        command.arg("--directory").arg(root)
+            .args(["run", "--extra", "parsers", "--extra", "http", "bookgraph"]);
+        command
+    }
+}
+
 fn run_mineru_assist(arguments: &[String]) -> Result<String, String> {
-    let bookgraph_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../bookgraph");
-    let output = Command::new("uv")
-        .arg("--directory")
-        .arg(bookgraph_root)
-        .arg("run")
-        .arg("--extra")
-        .arg("parsers")
-        .arg("bookgraph")
+    let output = bookgraph_command()
         .args(arguments)
         .output()
         .map_err(|error| format!("Unable to start BookGraph: {error}"))?;
@@ -383,16 +411,14 @@ fn get_mineru_workspace_info(book_id: String, state: State<DesktopState>) -> Res
 
 #[tauri::command]
 fn open_mineru_web() -> Result<(), String> {
-    let status = Command::new("xdg-open").arg("https://mineru.net/OpenSourceTools/Extractor").status()
-        .map_err(|error| format!("Unable to open MinerU Web: {error}"))?;
-    if status.success() { Ok(()) } else { Err("Unable to open MinerU Web.".to_owned()) }
+    open::that("https://mineru.net/OpenSourceTools/Extractor")
+        .map_err(|error| format!("Unable to open MinerU Web: {error}"))
 }
 
 #[tauri::command]
 fn open_local_folder(path: String) -> Result<(), String> {
     let folder = canonical_directory(Path::new(&path))?;
-    let status = Command::new("xdg-open").arg(folder).status().map_err(|error| format!("Unable to open folder: {error}"))?;
-    if status.success() { Ok(()) } else { Err("Unable to open folder.".to_owned()) }
+    open::that(folder).map_err(|error| format!("Unable to open folder: {error}"))
 }
 
 #[tauri::command]
@@ -467,9 +493,7 @@ fn remove_book(book_id: String, app: AppHandle, state: State<DesktopState>) -> R
     if workspace.parent() != Some(root.as_path()) {
         return Err("Only an immediate book workspace inside your library can be removed.".to_owned());
     }
-    let status = Command::new("gio").arg("trash").arg(&workspace).status()
-        .map_err(|error| format!("Unable to move this book to Trash: {error}"))?;
-    if !status.success() { return Err("Unable to move this book to Trash.".to_owned()); }
+    trash::delete(&workspace).map_err(|error| format!("Unable to move this book to Trash: {error}"))?;
     state.open_books.lock().map_err(|_| "Unable to update library state.".to_owned())?.remove(&book_id);
     state.book_workspaces.lock().map_err(|_| "Unable to update library state.".to_owned())?.remove(&book_id);
     Ok(())
@@ -481,12 +505,11 @@ async fn enrich_book_metadata(book_id: String, force: Option<bool>, app: AppHand
     let settings = read_settings(&app)?;
     let api_key = credential_entry()?.get_password().map_err(|_| "Add your AI API key in BookGraph settings to fill book details.".to_owned())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let bookgraph_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../bookgraph");
         let provider = if settings.provider.trim().is_empty() { DEFAULT_TRANSLATION_PROVIDER } else { settings.provider.as_str() };
         let base = if settings.provider_base_url.trim().is_empty() { DEFAULT_TRANSLATION_BASE_URL } else { settings.provider_base_url.trim() };
         let model = if settings.model.trim().is_empty() { DEFAULT_TRANSLATION_MODEL } else { settings.model.trim() };
-        let mut command = Command::new("uv");
-        command.arg("--directory").arg(bookgraph_root).args(["run", "--extra", "parsers", "bookgraph", "book-metadata"]).arg(workspace).arg("--ai")
+        let mut command = bookgraph_command();
+        command.arg("book-metadata").arg(workspace).arg("--ai")
             .env("BOOKGRAPH_TRANSLATION_API_KEY", api_key)
             .env("BOOKGRAPH_TRANSLATION_PROVIDER", provider)
             .env("BOOKGRAPH_TRANSLATION_BASE_URL", base)
@@ -499,22 +522,31 @@ async fn enrich_book_metadata(book_id: String, force: Option<bool>, app: AppHand
 }
 
 fn reader_command(workspace: &Path, settings: &AppSettings, api_key: &str, port: u16) -> Command {
-    let bookgraph_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../bookgraph");
     let provider = if settings.provider.trim().is_empty() { DEFAULT_TRANSLATION_PROVIDER } else { settings.provider.as_str() };
     let base = if settings.provider_base_url.trim().is_empty() { DEFAULT_TRANSLATION_BASE_URL } else { settings.provider_base_url.trim() };
     let model = if settings.model.trim().is_empty() { DEFAULT_TRANSLATION_MODEL } else { settings.model.trim() };
-    let mut command = Command::new("uv");
-    command.arg("--directory").arg(bookgraph_root)
-        .arg("run").arg("--extra").arg("http")
-        .arg("bookgraph").arg("serve-http")
+    let mut command = bookgraph_command();
+    command.arg("serve-http")
         .arg(workspace).arg("--host").arg("127.0.0.1").arg("--port").arg(port.to_string())
-        .args(["--allowed-origin", "http://localhost:5173", "--allowed-origin", "http://127.0.0.1:5173", "--allowed-origin", "tauri://localhost", "--allowed-origin", "http://tauri.localhost"])
+        .args(["--allowed-origin", "http://localhost:5173", "--allowed-origin", "http://127.0.0.1:5173", "--allowed-origin", "tauri://localhost", "--allowed-origin", "http://tauri.localhost", "--allowed-origin", "https://tauri.localhost"])
         // Credentials are passed only to the owned Python sidecar, never command-line args.
         .env("BOOKGRAPH_TRANSLATION_API_KEY", api_key)
         .env("BOOKGRAPH_TRANSLATION_PROVIDER", provider)
         .env("BOOKGRAPH_TRANSLATION_BASE_URL", base)
         .env("BOOKGRAPH_TRANSLATION_MODEL", model);
     command
+}
+
+fn stop_reader(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .creation_flags(0x08000000).status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn start_reader_server(workspace: &Path, state: &DesktopState, settings: &AppSettings) -> Result<String, String> {
@@ -529,8 +561,7 @@ fn start_reader_server(workspace: &Path, state: &DesktopState, settings: &AppSet
 
     let mut server = state.reader_server.lock().map_err(|_| "Unable to access reader server state.".to_owned())?;
     if let Some(mut existing) = server.take() {
-        let _ = existing.kill();
-        let _ = existing.wait();
+        stop_reader(&mut existing);
     }
     // Each desktop instance owns its endpoint instead of reusing an unrelated
     // server on port 8000 that may have a different workspace or no credential.
@@ -541,7 +572,7 @@ fn start_reader_server(workspace: &Path, state: &DesktopState, settings: &AppSet
     let base_url = format!("http://{address}");
     let mut child = reader_command(workspace, settings, &api_key, address.port())
         .spawn().map_err(|error| format!("Unable to start the local BookGraph reader service: {error}"))?;
-    for _ in 0..120 {
+    for _ in 0..300 {
         if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
             return Err(format!("The local BookGraph reader service exited before it was ready ({status})."));
         }
@@ -552,8 +583,7 @@ fn start_reader_server(workspace: &Path, state: &DesktopState, settings: &AppSet
         }
         thread::sleep(Duration::from_millis(100));
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    stop_reader(&mut child);
     Err("The local BookGraph reader service did not start in time.".to_owned())
 }
 
@@ -571,19 +601,61 @@ fn back_to_library(state: State<DesktopState>) {
     if let Ok(mut url) = state.reader_base_url.lock() { *url = None; }
     if let Ok(mut server) = state.reader_server.lock() {
         if let Some(mut child) = server.take() {
-            let _ = child.kill();
+            stop_reader(&mut child);
         }
     }
 }
 
+#[cfg(target_os = "linux")]
+fn integrate_appimage() -> Result<(), String> {
+    let Some(image) = std::env::var_os("APPIMAGE") else { return Ok(()); };
+    let image = PathBuf::from(image).canonicalize().map_err(|e| e.to_string())?;
+    let image = image.to_string_lossy();
+    if image.contains(['\n', '\r']) { return Err("Unsupported AppImage path".to_owned()); }
+    let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+        .ok_or_else(|| "User data directory is unavailable".to_owned())?;
+    let icons = data.join("icons/hicolor/512x512/apps");
+    let applications = data.join("applications");
+    fs::create_dir_all(&icons).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&applications).map_err(|e| e.to_string())?;
+    let icon = include_bytes!("../icons/icon.png");
+    let icon_path = icons.join("bookgraph-desktop.png");
+    if fs::read(&icon_path).ok().as_deref() != Some(icon.as_slice()) {
+        fs::write(&icon_path, icon).map_err(|e| e.to_string())?;
+    }
+    let escaped = image.replace('\\', "\\\\").replace('"', "\\\"")
+        .replace('`', "\\`").replace('$', "\\$").replace('%', "%%");
+    let entry = format!("[Desktop Entry]\nType=Application\nName=BookGraph\nExec=\"{escaped}\"\nIcon=bookgraph-desktop\nTerminal=false\nCategories=Education;\nStartupWMClass=bookgraph-desktop\nStartupNotify=true\n");
+    let desktop = applications.join("bookgraph-desktop.desktop");
+    if fs::read_to_string(&desktop).ok().as_deref() != Some(entry.as_str()) {
+        fs::write(desktop, entry).map_err(|e| e.to_string())?;
+        let _ = Command::new("update-desktop-database").arg(&applications).status();
+    }
+    let _ = Command::new("gtk-update-icon-cache").args(["-f", "-t"])
+        .arg(data.join("icons/hicolor")).status();
+    Ok(())
+}
+
 fn main() {
+    // Register before GTK creates the first window so Wayland can resolve its app ID.
+    #[cfg(target_os = "linux")]
+    if let Err(error) = integrate_appimage() {
+        eprintln!("Unable to register BookGraph desktop icon: {error}");
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(DesktopState::default())
         .invoke_handler(tauri::generate_handler![get_reader_api_base_url, get_app_settings, save_app_settings, get_credential_status, save_translation_api_key, delete_translation_api_key, select_profile_image, select_book_pdf, select_library_root, prepare_mineru_book, get_mineru_workspace_info, open_mineru_web, open_local_folder, organize_mineru_results, create_library_folder, scan_library, remove_book, enrich_book_metadata, open_book, back_to_library])
-        .run(tauri::generate_context!())
-        .expect("error while running BookGraph desktop application");
+        .build(tauri::generate_context!())
+        .expect("error while building BookGraph desktop application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                back_to_library(app.state::<DesktopState>());
+            }
+        });
 }
 
 #[cfg(test)]

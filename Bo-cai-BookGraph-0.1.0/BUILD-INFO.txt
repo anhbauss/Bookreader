@@ -1,0 +1,10 @@
+BookGraph desktop 0.1.0
+Source commit: 5e013d1b16c43e660745deb2497a5877a74320d2
+CI: https://github.com/anhbauss/Bookreader/actions/runs/44900426513
+Linux build host: Ubuntu 24.04 x86_64
+Windows build host: GitHub Actions windows-latest x64
+Windows installer: NSIS, current-user, unsigned
+Linux: Debian package and AppImage, libc >= 2.39
+Runtime: bundled Python 3.12 service; no developer environment required.
+Verification: frozen service with empty PATH; PDF rendering and crop;
+PDF workspace preparation; local HTTP; installed-service smoke checks on both OSes.

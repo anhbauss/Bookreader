@@ -13,9 +13,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+desktop = [
+  "pypdf>=4.0",
+  "pillow>=11",
+  "pypdfium2>=4.30",
+]
 parsers = [
   "markitdown[docx]>=0.1.8",
   "pypdf>=4.0",
+  "pillow>=11",
+  "pypdfium2>=4.30",
 ]
 mineru = [
   "mineru>=4.0.10,<5",
