@@ -45,7 +45,7 @@ export function CoveragePanel({
     const failed = coverage.failed_sections > 0 ? ` ${coverage.failed_sections} section(s) need retrying.` : "";
     return <section className="translation-status" aria-label="Vietnamese bilingual translation status">
       <div><strong>Vietnamese translation</strong><span>{progress} sections ready.{failed}</span></div>
-      <small>{coverage.status === "running" ? "Translating in the background…" : "Use Translate & Next Page to extend the edition one section at a time."}</small>
+      <small>{coverage.status === "running" ? (coverage.current_chunk && coverage.total_chunks ? `Translating part ${coverage.current_chunk} of ${coverage.total_chunks}…` : "Translating in the background…") : "Use Translate & Next Page to extend the edition one section at a time."}</small>
     </section>;
   }
   return <section className="coverage-panel" aria-label="Prepare bilingual translation">

@@ -1,8 +1,8 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getAcceptedSectionRepair,
-  getReadingProgress,
+  getDocumentReadingProgress,
   getSectionContext,
   acceptSectionRepair,
   repairSectionContent,
@@ -15,7 +15,7 @@ import {
   translateNextSection,
   type SectionContext,
 } from "./api";
-import { loadDocumentTitle, loadOutline, loadSection } from "./content";
+import { loadDocumentMetadata, loadOutline, loadSection } from "./content";
 import { MarkdownArticle, resolveBookGraphImageLinks } from "./markdown";
 import { MemoryPanel, ProgressPanel } from "./reader-panels";
 import { planIdForDocument, progressFromMarkRead, type MarkReadState, type ReaderProgressState } from "./reading";
@@ -25,7 +25,7 @@ import { canShowTranslation, isSectionInsideCoverage, resolveReadingMode, type R
 import { LibraryPage } from "./library/library-page";
 import { desktopApi, isDesktopApp } from "./desktop";
 import { Onboarding, useDesktopBootstrap } from "./onboarding";
-import { ReaderDrawer, ReaderHeader, SearchModal, useReaderPreferences, VisualSettingsPopover } from "./reader-experience";
+import { ReaderDrawer, ReaderHeader, ReaderInsights, SearchModal, useReaderPreferences, VisualSettingsPopover } from "./reader-experience";
 import type { ReaderOutline, ReaderSection } from "./types";
 
 const TRANSLATION_LANGUAGE = import.meta.env.VITE_BOOKGRAPH_TRANSLATION_LANGUAGE?.trim() || "vi";
@@ -134,7 +134,7 @@ export function App() {
   }, []);
   if (bootstrap.error) return <State title="Unable to open BookGraph" message={bootstrap.error} />;
   if (!bootstrap.state) return <State title="Opening BookGraph" message="Loading your local reading space…" />;
-  if (isDesktopApp() && (!bootstrap.state.settings.onboardingCompleted || !bootstrap.state.settings.libraryRoot)) {
+  if (isDesktopApp() && (!bootstrap.state.credential.configured || !bootstrap.state.settings.onboardingCompleted || !bootstrap.state.settings.libraryRoot)) {
     return <Onboarding
       initialSettings={bootstrap.state.settings}
       initialCredential={bootstrap.state.credential}
@@ -179,6 +179,7 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
   const [location, setLocation] = useState(route);
   const [section, setSection] = useState<ReaderSection | null>(null);
   const [bookTitle, setBookTitle] = useState<string | null>(null);
+  const [bookAuthor, setBookAuthor] = useState("");
   const [outline, setOutline] = useState<ReaderOutline | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [context, setContext] = useState<SectionContext | null>(null);
@@ -192,6 +193,8 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
   const [translationAction, setTranslationAction] = useState<"idle" | "starting" | "next">("idle");
   const [sectionRepairAction, setSectionRepairAction] = useState<"idle" | "repairing" | "failed">("idle");
   const [sectionRepairError, setSectionRepairError] = useState<string | null>(null);
+  const [sectionRepairProgress, setSectionRepairProgress] = useState<{ current: number; total: number } | null>(null);
+  const repairRequestId = useRef(0);
   const [sectionRepairCandidate, setSectionRepairCandidate] = useState<ContentRepair | null>(null);
   const [sectionRepairSaveState, setSectionRepairSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [repairedOriginal, setRepairedOriginal] = useState<string | null>(null);
@@ -200,6 +203,7 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState(false);
   const [bookmarked, setBookmarked] = useState(false);
   const preferences = useReaderPreferences();
 
@@ -238,19 +242,24 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
     setRepairedTranslation(null);
     setSectionRepairCandidate(null);
     setSectionRepairError(null);
+    repairRequestId.current += 1;
+    setSectionRepairAction("idle");
+    setSectionRepairProgress(null);
     setSectionRepairSaveState("idle");
     setSection(null);
     setBookTitle(null);
+    setBookAuthor("");
     void Promise.all([
       loadSection(location.docId, location.sectionId),
       loadOutline(location.docId),
-      loadDocumentTitle(location.docId),
+      loadDocumentMetadata(location.docId),
     ])
       .then(([nextSection, nextOutline, nextBookTitle]) => {
         if (cancelled) return;
         setSection(nextSection);
         setOutline(nextOutline);
-        setBookTitle(nextBookTitle);
+        setBookTitle(nextBookTitle.title);
+        setBookAuthor(nextBookTitle.author);
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : "Unable to load reader content");
@@ -282,10 +291,19 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
   }, [location]);
 
   useEffect(() => {
+    let cancelled = false;
+    const update = () => void loadDocumentMetadata(location.docId).then((metadata) => {
+      if (!cancelled) { setBookTitle(metadata.title); setBookAuthor(metadata.author); }
+    }).catch(() => {});
+    window.addEventListener("bookgraph-metadata-updated", update);
+    return () => { cancelled = true; window.removeEventListener("bookgraph-metadata-updated", update); };
+  }, [location.docId]);
+
+  useEffect(() => {
     if (!location.docId || validateReaderRoute(location.docId, location.sectionId) !== null) return;
     let cancelled = false;
     setProgressState({ status: "loading", progress: null, error: null });
-    void getReadingProgress(planIdForDocument(location.docId))
+    void getDocumentReadingProgress(location.docId)
       .then((progress) => { if (!cancelled) setProgressState({ status: "ready", progress, error: null }); })
       .catch((reason: unknown) => { if (!cancelled) setProgressState({ status: "error", progress: null, error: reason instanceof Error ? reason.message : "Unknown error" }); });
     return () => { cancelled = true; };
@@ -362,7 +380,7 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
   const requestCurrentTranslation = () => {
     if (!section) return;
     setTranslationAction("next");
-    void retrySectionTranslation(location.docId, TRANSLATION_LANGUAGE, section.bookgraph.id, true)
+    void retrySectionTranslation(location.docId, TRANSLATION_LANGUAGE, section.bookgraph.id, Boolean(translationState.translation?.content))
       .then((coverage) => {
         setCoverageState({ status: "ready", coverage, error: null });
         const waitForTranslation = () => void Promise.all([
@@ -374,7 +392,7 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
             setTranslationState({ status: "ready", translation, error: null });
             setTranslationAction("idle");
           } else if (coverage.status === "failed") {
-            setTranslationState({ status: "error", translation: null, error: "Unable to retranslate this section. Please try again later." });
+            setTranslationState({ status: "error", translation: null, error: coverage.failures[section.bookgraph.id] ?? "Unable to retranslate this section. Please try again later." });
             setTranslationAction("idle");
           } else {
             window.setTimeout(waitForTranslation, 1200);
@@ -402,8 +420,13 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
     const repairSource = section.body;
     setSectionRepairAction("repairing");
     setSectionRepairError(null);
-    void repairSectionContent(location.docId, section.bookgraph.id, repairSource, repairSource, "markdown")
+    setSectionRepairProgress(null);
+    const requestId = ++repairRequestId.current;
+    void repairSectionContent(location.docId, section.bookgraph.id, repairSource, repairSource, "markdown", (job) => {
+      if (requestId === repairRequestId.current) setSectionRepairProgress({ current: job.current_part, total: job.total_parts });
+    })
       .then((repair) => {
+        if (requestId !== repairRequestId.current) return;
         setRepairedOriginal(repair.repaired_content);
         setRepairedTitle(repair.title);
         setSectionRepairCandidate(repair);
@@ -411,6 +434,7 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
         setSectionRepairAction("idle");
       })
       .catch((reason: unknown) => {
+        if (requestId !== repairRequestId.current) return;
         setSectionRepairAction("failed");
         setSectionRepairError(reason instanceof Error ? reason.message : "Unable to repair this section.");
       });
@@ -466,19 +490,19 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { setSearchOpen(false); setSettingsOpen(false); setDrawerOpen(false); }
-      if (preferences.vertical || searchOpen || settingsOpen || drawerOpen || (event.target instanceof HTMLInputElement)) return;
+      if (event.key === "Escape") { setSearchOpen(false); setSettingsOpen(false); setDrawerOpen(false); setInsightsOpen(false); }
+      if (preferences.vertical || searchOpen || settingsOpen || drawerOpen || insightsOpen || (event.target instanceof HTMLInputElement)) return;
       if (event.key === "ArrowLeft") go(section?.bookgraph.prev_id ?? null);
       if (event.key === "ArrowRight") go(section?.bookgraph.next_id ?? null);
     };
     window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown);
-  }, [preferences.vertical, searchOpen, settingsOpen, drawerOpen, section]);
+  }, [preferences.vertical, searchOpen, settingsOpen, drawerOpen, insightsOpen, section]);
 
   const readerSource = section ? resolveBookGraphImageLinks(repairedOriginal ?? section.body, location.docId) : "";
   const [firstPage, secondPage] = useMemo(() => splitSequentialPages(readerSource), [readerSource]);
   return (
     <div className={`reader-shell reader-experience reader-font-${preferences.font} reader-size-${preferences.size} reader-mode-${mode} ${(mode !== "bilingual" && preferences.vertical) ? "reader-vertical" : ""}`} data-reader-theme={preferences.theme}>
-      <ReaderHeader title={bookTitle ?? location.docId ?? "Book Reader"} author="Alan V. Oppenheim" onSearch={() => setSearchOpen(true)} onSettings={() => setSettingsOpen((value) => !value)} onPanel={() => setDrawerOpen(true)} onBookmark={() => setBookmarked((value) => !value)} bookmarked={bookmarked} onLibrary={onBackToLibrary} />
+      <ReaderHeader title={bookTitle ?? location.docId ?? "Book Reader"} author={bookAuthor} onSearch={() => setSearchOpen(true)} onSettings={() => setSettingsOpen((value) => !value)} onPanel={() => setDrawerOpen(true)} onBookmark={() => setBookmarked((value) => !value)} bookmarked={bookmarked} onLibrary={onBackToLibrary} insightsOpen={insightsOpen} onInsights={() => { setInsightsOpen((value) => !value); setSettingsOpen(false); }} />
       {settingsOpen && <div className="visual-settings-anchor"><VisualSettingsPopover theme={preferences.theme} font={preferences.font} size={preferences.size} vertical={preferences.vertical} showVertical={mode !== "bilingual"} onTheme={preferences.setTheme} onFont={preferences.setFont} onSize={preferences.setSize} onVertical={preferences.setVertical} /></div>}
       {searchOpen && <SearchModal source={readerSource} onClose={() => setSearchOpen(false)} onResult={(id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" })} />}
       <ReaderDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} mode={mode} onMode={changeMode}><aside className="toc" aria-label="Table of contents"><div className="toc-heading"><span>Contents</span></div>{tree.map((node) => <button key={node.id} className={`toc-item level-${Math.min(node.level, 4)} ${node.id === currentId ? "active" : ""}`} onClick={() => go(node.id)}>{node.title}</button>)}</aside></ReaderDrawer>
@@ -502,7 +526,7 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
             <div><strong>Is the content rendering incorrectly?</strong><span>AI will review and repair the current section, including text, Markdown, and formulas.</span>{sectionRepairError && <small className="content-repair-error">{sectionRepairError}</small>}</div>
             <div className="content-repair-actions">
               <button type="button" disabled={sectionRepairAction === "repairing" || sectionRepairSaveState === "saved"} onClick={repairEntireSection}>
-                {sectionRepairAction === "repairing" ? "Repairing section…" : sectionRepairAction === "failed" ? "Try section repair again" : "Repair section with AI"}
+                {sectionRepairAction === "repairing" ? (sectionRepairProgress?.total ? `Repairing part ${sectionRepairProgress.current} of ${sectionRepairProgress.total}…` : "Starting repair…") : sectionRepairAction === "failed" ? "Try section repair again" : "Repair section with AI"}
               </button>
               {sectionRepairCandidate && sectionRepairSaveState !== "saved" && <button type="button" className="secondary" onClick={undoSectionRepair}>Undo</button>}
               {sectionRepairCandidate && <button type="button" className="save" disabled={sectionRepairSaveState === "saving" || sectionRepairSaveState === "saved"} onClick={saveSectionRepair}>
@@ -516,10 +540,10 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
           </section>}
         </article>}
       </main>
-      <aside className="reader-insights" aria-label="Reading progress and section memory">
+      <ReaderInsights open={insightsOpen} onClose={() => setInsightsOpen(false)}>
         <ProgressPanel state={progressState} markState={markState} onMarkRead={onMarkRead} disabled={!section} />
         <MemoryPanel context={context} status={contextStatus} error={contextError} />
-      </aside>
+      </ReaderInsights>
     </div>
   );
 }

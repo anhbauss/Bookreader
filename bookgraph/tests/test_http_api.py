@@ -61,6 +61,22 @@ def test_sections_and_outline_are_exposed_as_browser_safe_json(tmp_path: Path) -
     assert [node["id"] for node in outline.json()["nodes"]] == ["signals.intro", "signals.sampling"]
 
 
+def test_old_section_urls_resolve_to_their_group_after_resegmentation(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    section = Section(id="signals.sampling", doc_id="signals", title="1.1 Sampling", level=2,
+                      heading_path=["Signals", "1.1 Sampling"], text="Full reading unit.",
+                      metadata={"merged_section_ids": json.dumps(["signals.sampling", "signals.detail"])})
+    write_sections([section], workspace.sources_sections / "signals")
+    with TestClient(create_app(workspace)) as client:
+        response = client.get("/api/documents/signals/sections/signals.detail")
+        unknown = client.get("/api/documents/signals/sections/signals.unknown")
+    assert response.status_code == 200
+    assert response.json()["id"] == "signals.sampling"
+    assert response.json()["redirected_from"] == "signals.detail"
+    assert response.json()["text"] == "Full reading unit."
+    assert unknown.status_code == 404
+
+
 def test_api_allows_the_local_reader_origins(tmp_path: Path) -> None:
     app = create_app(_workspace(tmp_path))
 
@@ -174,3 +190,63 @@ def test_content_routes_are_read_only(method: str, tmp_path: Path) -> None:
     with TestClient(app) as client:
         response = getattr(client, method)("/api/documents/signals/sections/signals.intro")
     assert response.status_code == 405
+
+
+def test_document_progress_creates_a_default_plan_and_resumes_it(tmp_path: Path) -> None:
+    from bookgraph.reading_plans import read_reading_plan
+
+    workspace = _workspace(tmp_path)
+    workspace.config.write_text("[reading_plan]\ndaily_sections = 2\n")
+    with TestClient(create_app(workspace)) as client:
+        progress = client.get("/api/documents/signals/progress")
+        assert progress.status_code == 200
+        assert progress.json()["completed"] == 0
+        assert progress.json()["total"] == 2
+        assert client.post("/api/plans/signals/sections/signals.intro/read").status_code == 200
+        resumed = client.get("/api/documents/signals/progress")
+        assert resumed.json()["completed"] == 1
+    plan = read_reading_plan(workspace.reading_plans_root / "signals.json")
+    assert plan.daily_sections == 2
+    assert plan.completed == ["signals.intro"]
+
+
+def test_document_progress_keeps_existing_plan_unchanged(tmp_path: Path) -> None:
+    from bookgraph.mcp import service
+
+    workspace = _workspace(tmp_path)
+    service.create_plan(workspace, "signals", daily_sections=3)
+    service.mark_read(workspace, "signals", "signals.sampling")
+    plan_path = workspace.reading_plans_root / "signals.json"
+    before = plan_path.read_bytes()
+    with TestClient(create_app(workspace)) as client:
+        assert client.get("/api/documents/signals/progress").json()["completed"] == 1
+    assert plan_path.read_bytes() == before
+
+
+def test_document_progress_does_not_create_a_plan_for_a_missing_book(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    with TestClient(create_app(workspace)) as client:
+        assert client.get("/api/documents/missing/progress").status_code == 404
+    assert not (workspace.reading_plans_root / "missing.json").exists()
+
+
+def test_simultaneous_first_opens_create_one_resumable_default_plan(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from bookgraph.mcp import service
+
+    workspace = _workspace(tmp_path)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: service.get_document_progress(workspace, "signals"), range(8)))
+    assert all(result.total == 2 for result in results)
+    service.mark_read(workspace, "signals", "signals.intro")
+    assert service.get_document_progress(workspace, "signals").completed == 1
+
+
+def test_document_progress_does_not_replace_a_damaged_existing_plan(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    path = workspace.reading_plans_root / "signals.json"
+    path.write_text("damaged plan")
+    with TestClient(create_app(workspace)) as client:
+        assert client.get("/api/documents/signals/progress").status_code == 404
+    assert path.read_text() == "damaged plan"

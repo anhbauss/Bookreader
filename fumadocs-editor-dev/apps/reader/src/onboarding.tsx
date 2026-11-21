@@ -15,7 +15,7 @@ export function Onboarding({ initialSettings, initialCredential, onComplete }: {
   initialCredential: CredentialStatus;
   onComplete: () => void;
 }) {
-  const [step, setStep] = useState<Step>(initialSettings.displayName ? "library" : "profile");
+  const [step, setStep] = useState<Step>(initialSettings.displayName && initialCredential.configured ? "library" : "profile");
   const [settings, setSettings] = useState(initialSettings);
   const [credential, setCredential] = useState(initialCredential);
   const [apiKey, setApiKey] = useState("");
@@ -33,7 +33,11 @@ export function Onboarding({ initialSettings, initialCredential, onComplete }: {
     if (!credential.configured && !apiKey.trim()) { setError("Please enter an API key."); return; }
     setBusy(true); setError(null);
     try {
-      if (apiKey.trim()) setCredential(await desktopApi().saveTranslationApiKey(apiKey.trim()));
+      if (apiKey.trim()) {
+        const savedCredential = await desktopApi().saveTranslationApiKey(apiKey.trim());
+        if (!savedCredential.configured) throw new Error("Your API key could not be saved. Please try again.");
+        setCredential(savedCredential);
+      }
       const saved = await desktopApi().saveAppSettings({ ...settings, displayName });
       setSettings(saved);
       setApiKey("");
@@ -63,8 +67,7 @@ export function Onboarding({ initialSettings, initialCredential, onComplete }: {
     try {
       const libraryRoot = await desktopApi().selectLibraryRoot();
       if (!libraryRoot) return;
-      await desktopApi().saveAppSettings({ ...settings, libraryRoot, onboardingCompleted: true });
-      onComplete();
+      setSettings(await desktopApi().saveAppSettings({ ...settings, libraryRoot, onboardingCompleted: false }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to select this library folder.");
     } finally { setBusy(false); }
@@ -77,10 +80,28 @@ export function Onboarding({ initialSettings, initialCredential, onComplete }: {
     setBusy(true); setError(null);
     try {
       const libraryRoot = await desktopApi().createLibraryFolder(parentPath, folderName);
-      await desktopApi().saveAppSettings({ ...settings, libraryRoot, onboardingCompleted: true });
-      onComplete();
+      setSettings(await desktopApi().saveAppSettings({ ...settings, libraryRoot, onboardingCompleted: false }));
+      setNewFolderOpen(false);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to create this library folder.");
+    } finally { setBusy(false); }
+  };
+
+  const continueToLibrary = async () => {
+    if (!settings.libraryRoot) return;
+    setBusy(true); setError(null);
+    try {
+      const status = await desktopApi().getCredentialStatus();
+      setCredential(status);
+      if (!status.configured) {
+        setStep("profile");
+        setError("Please enter your API key before continuing.");
+        return;
+      }
+      setSettings(await desktopApi().saveAppSettings({ ...settings, onboardingCompleted: true }));
+      onComplete();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to open your library.");
     } finally { setBusy(false); }
   };
 
@@ -111,9 +132,11 @@ export function Onboarding({ initialSettings, initialCredential, onComplete }: {
         <h1 id="onboarding-title">Where do your books live?</h1>
         <p className="onboarding-copy">Choose a folder containing one BookGraph book workspace per subfolder. You can change it any time in Library.</p>
         <div className="library-folder-example"><FolderOpen size={21} /><div><strong>My Books</strong><span>├─ Signals and Systems<br />└─ Pattern Recognition</span></div></div>
+        {settings.libraryRoot && <div className="selected-library-folder"><FolderOpen size={19} /><div><strong>Selected library</strong><span>{settings.libraryRoot}</span></div></div>}
         {newFolderOpen && <section className="new-library-folder" aria-label="Create a new library folder"><div><strong>Create a new library folder</strong><button type="button" aria-label="Close new library folder" onClick={() => setNewFolderOpen(false)}><X size={16} /></button></div><label>Parent folder<input value={newFolderParent} onChange={(event) => setNewFolderParent(event.target.value)} placeholder="/home/you/Documents" /></label><button type="button" className="new-library-parent" disabled={busy} onClick={async () => { setBusy(true); setError(null); try { const parent = await desktopApi().selectLibraryRoot(); if (parent) setNewFolderParent(parent); } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to select a parent folder."); } finally { setBusy(false); } }}><FolderOpen size={15} />Choose parent folder</button><label>Library name<input value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)} placeholder="My Book Library" /></label><button className="new-library-confirm" type="button" disabled={busy} onClick={() => void createLibraryFolder()}>{busy ? "Creating…" : "Create library"}</button></section>}
         {error && <p className="onboarding-error" role="alert">{error}</p>}
-        <button className="onboarding-primary" type="button" disabled={busy} onClick={() => void chooseLibrary()}>{busy ? <><LoaderCircle className="spin" size={16} />Opening folder picker…</> : <><FolderOpen size={16} />Choose library folder</>}</button>
+        <button className="onboarding-primary" type="button" disabled={busy || !settings.libraryRoot} onClick={() => void continueToLibrary()}>{busy ? <><LoaderCircle className="spin" size={16} />Please wait…</> : "Continue"}</button>
+        <button className="onboarding-secondary" type="button" disabled={busy} onClick={() => void chooseLibrary()}><FolderOpen size={16} />{settings.libraryRoot ? "Change library folder" : "Choose library folder"}</button>
         <button className="onboarding-secondary" type="button" disabled={busy} onClick={() => setNewFolderOpen((open) => !open)}><Plus size={15} />Create new library folder</button>
         <button className="onboarding-secondary" type="button" disabled={busy} onClick={() => setStep("profile")}><KeyRound size={15} />Back to profile</button>
       </>}

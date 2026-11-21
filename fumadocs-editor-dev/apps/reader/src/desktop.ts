@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
+import { setRuntimeApiBaseUrl } from "./api";
 
 export type TranslationProvider = "openai-compatible" | "anthropic-compatible";
 
@@ -23,6 +24,12 @@ export type LibraryBook = {
   id: string;
   title: string;
   folderName: string;
+  authors?: string[];
+  editors?: string[];
+  coverImagePath?: string | null;
+  coverStatus?: "unchecked" | "selected" | "no_match" | "no_candidate" | "failed" | null;
+  metadataStatus?: "not_requested" | "running" | "ready" | "needs_review" | "failed" | null;
+  metadataError?: string | null;
   status: "ready" | "not_prepared" | "invalid" | "unavailable";
   documentId: string | null;
   sectionCount: number | null;
@@ -68,6 +75,8 @@ export type DesktopApi = {
   openMinerUWeb(): Promise<void>;
   getMinerUWorkspaceInfo(bookId: string): Promise<MinerUPreparation>;
   scanLibrary(): Promise<LibraryInventory>;
+  removeBook(bookId: string): Promise<void>;
+  enrichBookMetadata(bookId: string, force?: boolean): Promise<{ doc_id: string; ai_status: string; error: string | null }>;
   openBook(bookId: string): Promise<{ docId: string; sectionId: string }>;
   backToLibrary(): Promise<void>;
 };
@@ -165,6 +174,8 @@ function browserApi(): DesktopApi {
     async openMinerUWeb() { throw new Error("MinerU Web is available in the desktop application."); },
     async getMinerUWorkspaceInfo() { throw new Error("MinerU workspace information is available in the desktop application."); },
     async scanLibrary() { return { libraryName: null, books: [] }; },
+    async removeBook() { throw new Error("Removing a book requires the desktop application."); },
+    async enrichBookMetadata() { throw new Error("AI book details require the desktop application."); },
     async openBook() { throw new Error("Opening a local BookGraph workspace requires the desktop application."); },
     async backToLibrary() {},
   };
@@ -172,7 +183,13 @@ function browserApi(): DesktopApi {
 
 function tauriApi(invoke: TauriInvoke): DesktopApi {
   return {
-    getAppSettings: () => invoke<AppSettings>("get_app_settings"),
+    getAppSettings: async () => {
+      const settings = await invoke<AppSettings>("get_app_settings");
+      // Restore the endpoint after refreshing a reader window as well as opening a book.
+      const baseUrl = await invoke<string | null>("get_reader_api_base_url").catch(() => null);
+      setRuntimeApiBaseUrl(baseUrl);
+      return settings;
+    },
     saveAppSettings: (settings) => invoke<AppSettings>("save_app_settings", { settings }),
     getCredentialStatus: () => invoke<CredentialStatus>("get_credential_status"),
     saveTranslationApiKey: (apiKey) => invoke<CredentialStatus>("save_translation_api_key", { apiKey }),
@@ -187,8 +204,17 @@ function tauriApi(invoke: TauriInvoke): DesktopApi {
     openMinerUWeb: () => invoke<void>("open_mineru_web"),
     getMinerUWorkspaceInfo: (bookId) => invoke<MinerUPreparation>("get_mineru_workspace_info", { bookId }),
     scanLibrary: () => invoke<LibraryInventory>("scan_library"),
-    openBook: (bookId) => invoke<{ docId: string; sectionId: string }>("open_book", { bookId }),
-    backToLibrary: () => invoke<void>("back_to_library"),
+    removeBook: (bookId) => invoke<void>("remove_book", { bookId }),
+    enrichBookMetadata: (bookId, force = false) => invoke("enrich_book_metadata", { bookId, force }),
+    openBook: async (bookId) => {
+      const target = await invoke<{ docId: string; sectionId: string; apiBaseUrl?: string }>("open_book", { bookId });
+      setRuntimeApiBaseUrl(target.apiBaseUrl ?? null);
+      return target;
+    },
+    backToLibrary: async () => {
+      await invoke<void>("back_to_library");
+      setRuntimeApiBaseUrl(null);
+    },
   };
 }
 
@@ -202,6 +228,13 @@ export function desktopApi(): DesktopApi {
 
 export function isDesktopApp(): boolean {
   return isTauri() || Boolean((window as TauriWindow).__BOOKGRAPH_DESKTOP__);
+}
+
+export async function signOutDesktop(settings: AppSettings): Promise<AppSettings> {
+  const api = desktopApi();
+  await api.backToLibrary();
+  await api.deleteTranslationApiKey();
+  return api.saveAppSettings({ ...settings, onboardingCompleted: false });
 }
 
 export function localFileUrl(path: string): string {

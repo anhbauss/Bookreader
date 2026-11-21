@@ -78,6 +78,20 @@ daily_sections = 3
     assert config.reading_plan.daily_sections == 3
 
 
+def test_load_config_uses_translation_environment_when_workspace_has_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BOOKGRAPH_TRANSLATION_PROVIDER", "anthropic-compatible")
+    monkeypatch.setenv("BOOKGRAPH_TRANSLATION_BASE_URL", "https://api.mwapi.dev")
+    monkeypatch.setenv("BOOKGRAPH_TRANSLATION_MODEL", "claude-haiku-5-5")
+
+    config = load_config(WorkspacePaths(tmp_path))
+
+    assert config.translation.provider == "anthropic-compatible"
+    assert config.translation.base_url == "https://api.mwapi.dev"
+    assert config.translation.model == "claude-haiku-5-5"
+
+
 def test_segment_uses_configured_target_level(tmp_path: Path) -> None:
     runner = _init_workspace(tmp_path)
     (tmp_path / "bookgraph.toml").write_text(

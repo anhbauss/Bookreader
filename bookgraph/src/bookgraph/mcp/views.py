@@ -408,6 +408,8 @@ class DocumentRef(BaseModel):
     doc_id: str
     title: str
     section_count: int
+    authors: list[str] = Field(default_factory=list)
+    editors: list[str] = Field(default_factory=list)
 
 
 class DocumentList(BaseModel):

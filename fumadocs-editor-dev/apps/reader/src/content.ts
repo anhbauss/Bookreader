@@ -1,11 +1,13 @@
 import { request } from "./api";
-import { assertSectionMatchesRoute, isSafeRouteSegment, validateOutline } from "./reader";
+import { assertSectionMatchesRoute, isSafeRouteSegment, sectionFilename, validateOutline } from "./reader";
 import type { ReaderOutline, ReaderSection } from "./types";
 
 interface ApiDocument {
   doc_id: string;
   title: string;
   section_count: number;
+  authors?: string[];
+  editors?: string[];
 }
 
 interface ApiDocumentList {
@@ -13,6 +15,7 @@ interface ApiDocumentList {
 }
 
 interface ApiSection {
+  redirected_from?: string;
   id: string;
   doc_id: string;
   title: string;
@@ -43,6 +46,18 @@ export async function loadSection(docId: string, sectionId: string): Promise<Rea
   const section = await request<ApiSection>(
     `/api/documents/${encodeURIComponent(docId)}/sections/${encodeURIComponent(canonicalId)}`,
   );
+  let resolvedSectionId = sectionId;
+  if (section.redirected_from === canonicalId && section.doc_id === docId &&
+      section.id.startsWith(`${docId}.`) && isSafeRouteSegment(section.id)) {
+    resolvedSectionId = sectionFilename(section.id, docId);
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      params.set("doc", docId);
+      params.set("section", resolvedSectionId);
+      window.history.replaceState({}, "", `${window.location.pathname}?${params}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }
+  }
   return assertSectionMatchesRoute({
     title: section.title,
     bookgraph: {
@@ -57,15 +72,21 @@ export async function loadSection(docId: string, sectionId: string): Promise<Rea
       block_ids: section.block_ids,
     },
     body: section.text,
-  }, docId, sectionId);
+  }, docId, resolvedSectionId);
 }
 
-export async function loadDocumentTitle(docId: string): Promise<string> {
+export async function loadDocumentMetadata(docId: string): Promise<{ title: string; author: string }> {
   if (!isSafeRouteSegment(docId)) throw new Error("The reader URL contains an invalid document id.");
   const documents = (await request<ApiDocumentList>("/api/documents")).documents;
   const document = documents.find((candidate) => candidate.doc_id === docId);
   if (!document) throw new Error("Document not found");
-  return document.title;
+  const authors = document.authors ?? [];
+  const editors = document.editors ?? [];
+  return { title: document.title, author: authors.length ? authors.join(", ") : editors.length ? `Edited by ${editors.join(", ")}` : "" };
+}
+
+export async function loadDocumentTitle(docId: string): Promise<string> {
+  return (await loadDocumentMetadata(docId)).title;
 }
 
 export async function loadOutline(docId: string): Promise<ReaderOutline> {

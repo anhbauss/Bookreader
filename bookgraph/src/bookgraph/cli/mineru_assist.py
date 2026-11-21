@@ -13,6 +13,7 @@ from bookgraph.mineru_assisted import (
     build_reading_workspace,
     organize_mineru_downloads,
     prepare_mineru_workspace,
+    regroup_reading_workspace,
 )
 
 mineru_assist_app = typer.Typer(help="Prepare and organize manual MinerU Web results.")
@@ -54,10 +55,24 @@ def organize(
 def build(
     workspace: Annotated[Path, typer.Argument(help="Prepared BookGraph book workspace.")],
 ) -> None:
-    """Build a reader-ready document and sections from normalized MinerU JSON."""
+    """Build reading sections from MinerU Markdown, ZIP images, and JSON provenance."""
     try:
         doc_id, sections = build_reading_workspace(workspace)
     except MinerUAssistedError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"doc_id: {doc_id}")
+    typer.echo(f"sections: {sections}")
+
+
+@mineru_assist_app.command("resegment")
+def resegment(
+    workspace: Annotated[Path, typer.Argument(help="Existing BookGraph book workspace.")],
+    depth: Annotated[int, typer.Option("--depth", help="Numbered reading-unit depth: 2 or 3.")] = 2,
+) -> None:
+    """Group existing sections without re-parsing or discarding accepted repairs."""
+    try:
+        doc_id, sections = regroup_reading_workspace(workspace, depth)
+    except (MinerUAssistedError, OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"doc_id: {doc_id}")
     typer.echo(f"sections: {sections}")

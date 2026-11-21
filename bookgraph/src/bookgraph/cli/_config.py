@@ -79,13 +79,14 @@ def load_config(workspace: WorkspacePaths) -> BookGraphConfig:
     """Load optional workspace config, falling back to the default init contract."""
 
     if not workspace.config.is_file():
-        return BookGraphConfig()
-    if tomllib is None:  # pragma: no cover
-        raise typer.BadParameter("Python tomllib is required to read bookgraph.toml")
-    try:
-        payload = tomllib.loads(workspace.config.read_text())
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        raise typer.BadParameter(f"Invalid workspace config: {workspace.config}: {exc}") from exc
+        payload: dict[str, Any] = {}
+    else:
+        if tomllib is None:  # pragma: no cover
+            raise typer.BadParameter("Python tomllib is required to read bookgraph.toml")
+        try:
+            payload = tomllib.loads(workspace.config.read_text())
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise typer.BadParameter(f"Invalid workspace config: {workspace.config}: {exc}") from exc
 
     return BookGraphConfig(
         parsers=ParserConfig(
@@ -123,12 +124,22 @@ def load_config(workspace: WorkspacePaths) -> BookGraphConfig:
             daily_sections=_positive_int_at(payload, ["reading_plan", "daily_sections"], 1)
         ),
         translation=TranslationConfig(
-            provider=_optional_string_at(payload, ["translation", "provider"]),
-            base_url=_optional_url_at(payload, ["translation", "base_url"]),
-            model=_optional_string_at(payload, ["translation", "model"]),
+            provider=_optional_string_at(payload, ["translation", "provider"])
+            or _optional_environment("BOOKGRAPH_TRANSLATION_PROVIDER"),
+            base_url=_optional_url_at(payload, ["translation", "base_url"])
+            or _optional_environment("BOOKGRAPH_TRANSLATION_BASE_URL"),
+            model=_optional_string_at(payload, ["translation", "model"])
+            or _optional_environment("BOOKGRAPH_TRANSLATION_MODEL"),
             timeout_seconds=_positive_int_at(payload, ["translation", "timeout_seconds"], 120),
         ),
     )
+
+
+def _optional_environment(name: str) -> str | None:
+    """Return a non-empty process value, without letting whitespace become config."""
+
+    value = os.environ.get(name, "").strip()
+    return value or None
 
 
 def _get_nested(payload: dict[str, Any], path: list[str]) -> Any:

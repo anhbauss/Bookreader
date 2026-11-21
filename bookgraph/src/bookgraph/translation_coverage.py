@@ -24,8 +24,9 @@ from bookgraph.mcp.errors import ReadingServiceError
 from bookgraph.mcp.loading import _load_doc_sections, _validate_id
 from bookgraph.mcp.translation_tools import get_section_translation, write_section_translation
 from bookgraph.models import Section
-from bookgraph.translations import translation_paths
+from bookgraph.translation_chunks import clear_translation_chunks, translate_in_chunks
 from bookgraph.translation_provider import TranslationProviderConfig, configured_provider
+from bookgraph.translations import section_content_hash, translation_paths
 from bookgraph.workspace import WorkspacePaths
 
 CoverageStatus = Literal["missing", "queued", "running", "ready", "failed"]
@@ -39,6 +40,8 @@ class TranslationCoverageRecord(BaseModel):
     target_section_ids: list[str] = Field(default_factory=list)
     failed_sections: dict[str, str] = Field(default_factory=dict)
     current_section_id: str | None = None
+    current_chunk: int | None = None
+    total_chunks: int | None = None
     updated_at: str | None = None
 
 
@@ -53,6 +56,8 @@ class TranslationCoverageView(BaseModel):
     failed_sections: int
     status: CoverageStatus
     current_section_id: str | None = None
+    current_chunk: int | None = None
+    total_chunks: int | None = None
     next_section_id: str | None = None
     failures: dict[str, str] = Field(default_factory=dict)
 
@@ -117,6 +122,8 @@ def get_translation_coverage(
         failed_sections=len(failures),
         status=status,
         current_section_id=record.current_section_id,
+        current_chunk=record.current_chunk,
+        total_chunks=record.total_chunks,
         next_section_id=next_section_id,
         failures=failures,
     )
@@ -127,8 +134,8 @@ def request_translation_coverage(
 ) -> TranslationCoverageView:
     """Persist a requested prefix of the document; a worker performs the network work."""
 
-    if percent not in {5, 10, 25, 100}:
-        raise ReadingServiceError("translation coverage percent must be one of 5, 10, 25, or 100")
+    if isinstance(percent, bool) or not 1 <= percent <= 100:
+        raise ReadingServiceError("translation coverage percent must be between 1 and 100")
     resolved_doc_id = _validate_id(doc_id, "doc_id")
     sections = _load_doc_sections(workspace, resolved_doc_id)
     count = min(len(sections), max(1, math.ceil(len(sections) * percent / 100)))
@@ -183,6 +190,9 @@ def retry_translation_section(
     if force:
         cached.body.unlink(missing_ok=True)
         cached.metadata.unlink(missing_ok=True)
+        clear_translation_chunks(
+            workspace, next(item for item in sections if item.id == resolved_section_id), lang
+        )
     path = _record_path(workspace, resolved_doc_id, lang)
     with _record_lock(path):
         old = _read_record(path)
@@ -191,7 +201,7 @@ def retry_translation_section(
                 doc_id=resolved_doc_id,
                 lang=lang,
                 requested_percent=0,
-                target_section_ids=ids,
+                target_section_ids=[],
                 failed_sections={},
             )
         # Ensure the section is part of the target set so the worker picks it up even
@@ -271,6 +281,7 @@ def _run_requested_translations(
 ) -> None:
     provider = None
     model: str | None = None
+    provider_config: TranslationProviderConfig | None = None
     while True:
         with _record_lock(path):
             record = _read_record(path)
@@ -286,7 +297,12 @@ def _run_requested_translations(
                 return
             section_id = pending[0]
             record = record.model_copy(
-                update={"current_section_id": section_id, "updated_at": _now()}
+                update={
+                    "current_section_id": section_id,
+                    "current_chunk": None,
+                    "total_chunks": None,
+                    "updated_at": _now(),
+                }
             )
             _write_record(record, path)
         try:
@@ -298,21 +314,27 @@ def _run_requested_translations(
 
                 config = load_config(workspace).translation
                 model = config.model
-                provider = configured_provider(
-                    TranslationProviderConfig(
-                        provider=config.provider,
-                        base_url=config.base_url,
-                        model=config.model,
-                        timeout_seconds=config.timeout_seconds,
-                    )
+                provider_config = TranslationProviderConfig(
+                    provider=config.provider,
+                    base_url=config.base_url,
+                    model=config.model,
+                    timeout_seconds=config.timeout_seconds,
                 )
+                provider = configured_provider(provider_config)
             section = next(
                 item
                 for item in _load_doc_sections(workspace, resolved_doc_id)
                 if item.id == section_id
             )
-            translated = provider.translate_section(section.text, target_language=lang)
-            translated_title = provider.translate_title(section.title, target_language=lang)
+            assert provider_config is not None
+            translated, translated_title = translate_in_chunks(
+                workspace,
+                section,
+                lang,
+                provider,
+                provider_config,
+                on_progress=lambda current, total: _record_chunk_progress(path, current, total),
+            )
             write_section_translation(
                 workspace,
                 resolved_doc_id,
@@ -322,6 +344,7 @@ def _run_requested_translations(
                 translated_title=translated_title,
                 includes_assets=_section_has_asset_markdown(section.text),
                 model=model,
+                source_section_hash=section_content_hash(section),
             )
         except (ReadingServiceError, StopIteration) as exc:
             _LOGGER.warning("Translation of %s failed: %s", section_id, exc)
@@ -342,6 +365,8 @@ def _run_requested_translations(
                     latest.model_copy(
                         update={
                             "current_section_id": None,
+                            "current_chunk": None,
+                            "total_chunks": None,
                             "failed_sections": {
                                 key: value
                                 for key, value in latest.failed_sections.items()
@@ -362,6 +387,22 @@ def _pending_ids(workspace: WorkspacePaths, record: TranslationCoverageRecord) -
         and get_section_translation(workspace, record.doc_id, section_id, record.lang, False).status
         != "fresh"
     ]
+
+
+def _record_chunk_progress(path: Path, current: int, total: int) -> None:
+    with _record_lock(path):
+        record = _read_record(path)
+        if record is not None:
+            _write_record(
+                record.model_copy(
+                    update={
+                        "current_chunk": current,
+                        "total_chunks": total,
+                        "updated_at": _now(),
+                    }
+                ),
+                path,
+            )
 
 
 def _section_has_asset_markdown(source: str) -> bool:

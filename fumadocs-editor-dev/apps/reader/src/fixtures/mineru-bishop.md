@@ -1,0 +1,5 @@
+<table><tr><td></td><td>M=0</td><td>M=1</td><td>M=6</td><td>M=9</td></tr><tr><td><eq>w_0^\star</eq></td><td>0.19</td><td>0.82</td><td>0.31</td><td>0.35</td></tr><tr><td><eq>w_1^\star</eq></td><td></td><td>-1.27</td><td>7.99</td><td>232.37</td></tr><tr><td><eq>w_2^\star</eq></td><td></td><td></td><td>-25.43</td><td>-5321.83</td></tr><tr><td><eq>w_3^\star</eq></td><td></td><td></td><td>17.37</td><td>48568.31</td></tr><tr><td><eq>w_4^\star</eq></td><td></td><td></td><td></td><td>-231639.30</td></tr><tr><td><eq>w_5^\star</eq></td><td></td><td></td><td></td><td>640042.26</td></tr><tr><td><eq>w_6^\star</eq></td><td></td><td></td><td></td><td>-1061800.52</td></tr><tr><td><eq>w_7^\star</eq></td><td></td><td></td><td></td><td>1042400.18</td></tr><tr><td><eq>w_8^\star</eq></td><td></td><td></td><td></td><td>-557682.99</td></tr><tr><td><eq>w_9^\star</eq></td><td></td><td></td><td></td><td>125201.43</td></tr></table>
+
+$$
+y (x, \mathbf {w}) = w _ {0} + w _ {1} x + w _ {2} x ^ {2} + \dots + w _ {M} x ^ {M} = \sum_ {j = 0} ^ {M} w _ {j} x ^ {j}\tag{1.1}
+$$

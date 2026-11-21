@@ -1,4 +1,4 @@
-import { Bookmark, Library, List, Search, Settings2, X } from "lucide-react";
+import { Bookmark, Library, List, PanelRight, Search, Settings2, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ReadingMode } from "./translation";
 import "./reader-experience.css";
@@ -7,18 +7,42 @@ type ReaderTheme = "light" | "dark" | "paper";
 type ReaderFont = "serif" | "sans";
 type ReaderSize = "s" | "m" | "l" | "xl";
 
-type HeaderProps = { title: string; author: string; onSearch: () => void; onSettings: () => void; onPanel: () => void; onBookmark: () => void; bookmarked: boolean; onLibrary: () => void };
-export function ReaderHeader({ title, author, onSearch, onSettings, onPanel, onBookmark, bookmarked, onLibrary }: HeaderProps) {
+type HeaderProps = { title: string; author: string; onSearch: () => void; onSettings: () => void; onPanel: () => void; onBookmark: () => void; bookmarked: boolean; onLibrary: () => void; insightsOpen: boolean; onInsights: () => void };
+export function ReaderHeader({ title, author, onSearch, onSettings, onPanel, onBookmark, bookmarked, onLibrary, insightsOpen, onInsights }: HeaderProps) {
   return <header className="book-reader-header">
     <button type="button" className="reader-library-link" onClick={onLibrary}><Library size={17} aria-hidden="true" /> Library</button>
-    <div className="reader-book-context"><span>{title}</span><small>{author}</small></div>
+    <div className="reader-book-context"><span>{title}</span>{author && <small>{author}</small>}</div>
     <div className="reader-header-actions">
       <button type="button" aria-label="Search in this book" onClick={onSearch}><Search size={18} /></button>
       <button type="button" aria-label={bookmarked ? "Remove bookmark" : "Bookmark this page"} aria-pressed={bookmarked} onClick={onBookmark}><Bookmark size={18} fill={bookmarked ? "currentColor" : "none"} /></button>
       <button type="button" aria-label="Open reading panels" onClick={onPanel}><List size={18} /></button>
       <button type="button" aria-label="Open visual settings" onClick={onSettings}><Settings2 size={18} /></button>
+      <button type="button" aria-label="Toggle progress and memory" title="Progress & memory" aria-expanded={insightsOpen} aria-controls="reader-insights" onClick={onInsights}><PanelRight size={18} /></button>
     </div>
   </header>;
+}
+
+export function ReaderInsights({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    closeButton.current?.focus();
+    return () => { previousFocus?.focus(); };
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (event.target instanceof Node && !panel.current?.contains(event.target)) onClose();
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [open, onClose]);
+  return <aside ref={panel} id="reader-insights" className={`reader-insights reader-insights-drawer ${open ? "open" : ""}`} aria-label="Reading progress and section memory" aria-hidden={!open} inert={!open} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
+    <header className="reader-insights-header"><span>Progress & memory</span><button ref={closeButton} type="button" aria-label="Close progress and memory" onClick={onClose}><X size={19} /></button></header>
+    {children}
+  </aside>;
 }
 
 type SettingsProps = { theme: ReaderTheme; font: ReaderFont; size: ReaderSize; vertical: boolean; showVertical: boolean; onTheme: (value: ReaderTheme) => void; onFont: (value: ReaderFont) => void; onSize: (value: ReaderSize) => void; onVertical: (value: boolean) => void };

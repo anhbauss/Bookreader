@@ -14,6 +14,7 @@ import os
 import re
 import stat
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -22,7 +23,10 @@ from pydantic import BaseModel
 
 from bookgraph.mcp.errors import ReadingServiceError
 from bookgraph.mcp.loading import _load_doc_sections, _validate_id
+from bookgraph.models import Section
+from bookgraph.repair_chunks import repair_in_chunks
 from bookgraph.translation_provider import TranslationProviderConfig, configured_provider
+from bookgraph.translations import section_content_hash
 from bookgraph.workspace import WorkspacePaths
 
 RepairKind = Literal["formula", "markdown", "region"]
@@ -52,12 +56,20 @@ def repair_content(
     content: str,
     context: str,
     kind: RepairKind,
+    *,
+    on_progress: Callable[[int, int], None] | None = None,
+    expected_section_hash: str | None = None,
 ) -> ContentRepairView:
     """Repair one selected formula or Markdown block and persist its candidate."""
 
     resolved_doc_id = _validate_id(doc_id, "doc_id")
-    if section_id not in {section.id for section in _load_doc_sections(workspace, resolved_doc_id)}:
+    sections = _load_doc_sections(workspace, resolved_doc_id)
+    current = next((section for section in sections if section.id == section_id), None)
+    if current is None:
         raise ReadingServiceError("section is not part of this document")
+    snapshot = section_content_hash(current)
+    if expected_section_hash is not None and expected_section_hash != snapshot:
+        raise ReadingServiceError("Section changed before repair started; reload it and retry.")
     if Path(section_id).name != section_id or section_id in {"", ".", ".."}:
         raise ReadingServiceError("section id is unsafe")
     _validate_input(content, context, kind)
@@ -75,14 +87,8 @@ def repair_content(
     from bookgraph.cli._config import load_config
 
     config = load_config(workspace).translation
-    # Interactive region/formula repairs must not block behind a 120-second provider
-    # timeout after the browser has already given up. Only full-section repair keeps
-    # the configured (longer) timeout.
-    timeout_seconds = (
-        min(config.timeout_seconds, 40)
-        if kind in {"formula", "region"}
-        else config.timeout_seconds
-    )
+    # Bound each provider call, rather than imposing one deadline on a whole section.
+    timeout_seconds = min(config.timeout_seconds, 60 if kind == "markdown" else 40)
     provider = configured_provider(
         TranslationProviderConfig(
             provider=config.provider,
@@ -91,22 +97,47 @@ def repair_content(
             timeout_seconds=timeout_seconds,
         )
     )
+    def validate_part(title: str | None, body: str) -> None:
+        if kind == "markdown":
+            if title is None:
+                raise ReadingServiceError("Repair provider returned no section title.")
+            _validate_title(title, sections, section_id)
+        _validate_repaired_content(body, content, kind)
+
+    local_context = context.replace(content, "[Selected content is supplied separately.]")[:2400]
     if kind == "formula":
+        if on_progress:
+            on_progress(1, 1)
         title = None
-        repaired = provider.repair_formula(content, context=context)
+        repaired = provider.repair_formula(content, context=local_context)
+    elif len(content) > 4000:
+        identity = json.dumps({
+            "version": 1, "source": snapshot, "content": content, "context": context,
+            "kind": kind, "provider": config.provider, "base_url": config.base_url,
+            "model": config.model,
+        }, sort_keys=True)
+        directory = (workspace.runs_root / "repair-parts" / resolved_doc_id
+                     / _source_hash(section_id) / hashlib.sha256(identity.encode()).hexdigest())
+        title, repaired = repair_in_chunks(
+            content, context, current.title, kind, provider, directory,
+            validate_part, on_progress=on_progress,
+        )
     elif kind == "region":
+        if on_progress:
+            on_progress(1, 1)
         title = None
-        repaired = provider.repair_region(content, context=context)
+        repaired = provider.repair_region(content, context=local_context)
     else:
-        sections = _load_doc_sections(workspace, resolved_doc_id)
-        current = next(section for section in sections if section.id == section_id)
-        # The reader sends the body only, so make the source title explicit context.
-        # Otherwise the model has no reliable way to preserve a section number such as
-        # ``12.3.`` when it returns the corrected title.
+        if on_progress:
+            on_progress(1, 1)
         title_context = f"--- CURRENT SECTION TITLE ---\n{current.title}\n--- END CURRENT SECTION TITLE ---\n\n"
-        title, repaired = provider.repair_markdown(content, context=title_context + context)
+        title, repaired = provider.repair_markdown(content, context=title_context + local_context)
         _validate_title(title, sections, section_id)
     _validate_repaired_content(repaired, content, kind)
+    latest = next((item for item in _load_doc_sections(workspace, resolved_doc_id)
+                   if item.id == section_id), None)
+    if latest is None or section_content_hash(latest) != snapshot:
+        raise ReadingServiceError("Section changed during repair; reload it and retry.")
     view = ContentRepairView(
         doc_id=resolved_doc_id,
         section_id=section_id,
@@ -243,7 +274,7 @@ def _atomic_write(path: Path, content: str) -> None:
         raise
 
 
-def _validate_title(title: str, sections: list[object], section_id: str) -> None:
+def _validate_title(title: str, sections: list[Section], section_id: str) -> None:
     if not title or len(title) > 300 or "\n" in title or "<" in title or ">" in title:
         raise ReadingServiceError("Content repair provider returned an invalid section title.")
     original = next(section for section in sections if getattr(section, "id") == section_id)

@@ -2,13 +2,16 @@
 
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, net::TcpStream, path::{Path, PathBuf}, process::{Child, Command}, sync::Mutex, thread, time::Duration};
+use std::{collections::HashMap, fs, net::{TcpListener, TcpStream}, path::{Path, PathBuf}, process::{Child, Command}, sync::Mutex, thread, time::Duration};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 const APP_SETTINGS_FILE: &str = "settings.json";
 const KEYRING_SERVICE: &str = "com.bookgraph.reader";
 const KEYRING_ACCOUNT: &str = "translation-api-key";
+const DEFAULT_TRANSLATION_PROVIDER: &str = "anthropic-compatible";
+const DEFAULT_TRANSLATION_BASE_URL: &str = "https://api.mwapi.dev";
+const DEFAULT_TRANSLATION_MODEL: &str = "claude-haiku-5-5";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +62,21 @@ struct LibraryBook {
     section_count: Option<usize>,
     progress_percent: Option<u8>,
     reason: Option<String>,
+    #[serde(flatten)]
+    display: BookDisplay,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BookDisplay {
+    #[serde(skip)]
+    title: Option<String>,
+    authors: Vec<String>,
+    editors: Vec<String>,
+    cover_image_path: Option<String>,
+    cover_status: Option<String>,
+    metadata_status: Option<String>,
+    metadata_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -101,6 +119,7 @@ struct DesktopState {
     open_books: Mutex<HashMap<String, BookTarget>>,
     book_workspaces: Mutex<HashMap<String, PathBuf>>,
     reader_server: Mutex<Option<Child>>,
+    reader_base_url: Mutex<Option<String>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -108,6 +127,8 @@ struct DesktopState {
 struct BookTarget {
     doc_id: String,
     section_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api_base_url: Option<String>,
 }
 
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -165,6 +186,35 @@ fn stable_hash(value: &str) -> u64 {
     hash
 }
 
+fn library_display(folder: &Path) -> BookDisplay {
+    let path = folder.join("book-metadata.json");
+    let Some(value) = fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok()) else { return BookDisplay::default(); };
+    let names = |key: &str| value.get(key).and_then(|v| v.as_array()).map(|items| items.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()).unwrap_or_default();
+    let cover_version = value.get("version").and_then(|v| v.as_u64()).unwrap_or(1);
+    let cover = (cover_version >= 2).then(|| value.get("cover_path").and_then(|v| v.as_str())).flatten().and_then(|relative| {
+        let candidate = folder.join(relative).canonicalize().ok()?;
+        let root = folder.canonicalize().ok()?;
+        if candidate.starts_with(root) && candidate.is_file() { Some(candidate.to_string_lossy().into_owned()) } else { None }
+    });
+    let mut metadata_status = value.get("ai_status").and_then(|v| v.as_str()).map(str::to_owned);
+    // Older versions used the PDF's first page as a cover, which can be a back cover or an illustration.
+    let cover_review = value.get("cover_review_version").and_then(|v| v.as_u64()).unwrap_or(1);
+    if cover_version < 2 || cover_review < 3 { metadata_status = None; }
+    // Parsing/OCR can add front-page evidence after the first metadata attempt.
+    if let Some(metadata_time) = fs::metadata(&path).ok().and_then(|v| v.modified().ok()) {
+        let newer = fs::read_dir(folder.join("sources/parsed")).ok().map(|entries| entries.filter_map(Result::ok).any(|entry| {
+            fs::metadata(entry.path().join("document.json")).ok().and_then(|v| v.modified().ok()).map(|time| time > metadata_time).unwrap_or(false)
+        })).unwrap_or(false);
+        if newer && metadata_status.as_deref() != Some("ready") { metadata_status = None; }
+    }
+    BookDisplay {
+        title: value.get("title").and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty()).map(str::to_owned),
+        authors: names("authors"), editors: names("editors"), cover_image_path: cover,
+        cover_status: value.get("cover_status").and_then(|v| v.as_str()).map(str::to_owned),
+        metadata_status, metadata_error: value.get("error").and_then(|v| v.as_str()).map(str::to_owned),
+    }
+}
+
 fn document_metadata(folder: &Path) -> Option<(String, String)> {
     let parsed = folder.join("sources").join("parsed");
     let entries = fs::read_dir(parsed).ok()?;
@@ -186,6 +236,19 @@ fn first_section_id(folder: &Path, doc_id: &str) -> Option<String> {
     value.get("id")?.as_str().map(str::to_owned)
 }
 
+fn reading_progress_percent(folder: &Path, doc_id: &str) -> Option<u8> {
+    let path = folder.join("reading_plans").join(format!("{doc_id}.json"));
+    let raw = fs::read_to_string(path).ok()?;
+    let plan: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let section_ids = plan.get("section_ids")?.as_array()?;
+    let total = section_ids.len();
+    if total == 0 { return None; }
+    let completed = plan.get("completed")?.as_array()?;
+    let completed_ids: std::collections::HashSet<&str> = completed.iter().filter_map(serde_json::Value::as_str).collect();
+    let count = section_ids.iter().filter_map(serde_json::Value::as_str).filter(|id| completed_ids.contains(id)).count();
+    Some(((count * 100) / total).min(100) as u8)
+}
+
 #[tauri::command]
 fn get_app_settings(app: AppHandle) -> Result<AppSettings, String> { read_settings(&app) }
 
@@ -205,6 +268,11 @@ fn save_app_settings(app: AppHandle, settings: AppSettings) -> Result<AppSetting
 
 #[tauri::command]
 fn get_credential_status() -> Result<CredentialStatus, String> { credential_status() }
+
+#[tauri::command]
+fn get_reader_api_base_url(state: State<DesktopState>) -> Result<Option<String>, String> {
+    state.reader_base_url.lock().map(|url| url.clone()).map_err(|_| "Unable to access reader endpoint.".to_owned())
+}
 
 #[tauri::command]
 fn save_translation_api_key(api_key: String) -> Result<CredentialStatus, String> {
@@ -301,6 +369,8 @@ fn prepare_mineru_book(app: AppHandle, pdf_path: String, title: String) -> Resul
     ])?;
     let workspace_line = output.lines().find_map(|line| line.strip_prefix("workspace: "))
         .ok_or_else(|| "BookGraph did not return the new workspace location.".to_owned())?;
+    // Cache local title evidence before the Library's automatic AI enrichment.
+    let _ = run_mineru_assist(&["book-metadata".to_owned(), workspace_line.to_owned()]);
     mineru_workspace_info(PathBuf::from(workspace_line))
 }
 
@@ -364,59 +434,141 @@ fn scan_library(app: AppHandle, state: State<DesktopState>) -> Result<LibraryInv
         let path = entry.path();
         if !path.is_dir() || entry.file_name().to_string_lossy().starts_with('.') { continue; }
         let folder_name = entry.file_name().to_string_lossy().into_owned();
+        let display = library_display(&path);
         let id = folder_id(&path);
         workspaces.insert(id.clone(), path.clone());
         let manifest = path.join("bookgraph.toml");
         let Some((doc_id, title)) = document_metadata(&path) else {
             let (status, reason) = if manifest.exists() { ("not_prepared", "BookGraph workspace is missing a single reader-ready document.") } else { ("invalid", "This folder does not contain a BookGraph workspace.") };
-            books.push(LibraryBook { id, title: folder_name.clone(), folder_name, status: status.to_owned(), document_id: None, section_count: None, progress_percent: None, reason: Some(reason.to_owned()) });
+            books.push(LibraryBook { id, title: display.title.clone().unwrap_or_else(|| folder_name.clone()), folder_name, status: status.to_owned(), document_id: None, section_count: None, progress_percent: None, reason: Some(reason.to_owned()), display });
             continue;
         };
+        let title = display.title.clone().unwrap_or(title);
         let Some(section_id) = first_section_id(&path, &doc_id) else {
-            books.push(LibraryBook { id, title, folder_name, status: "not_prepared".to_owned(), document_id: Some(doc_id), section_count: None, progress_percent: None, reason: Some("No readable sections were found for this document.".to_owned()) });
+            books.push(LibraryBook { id, title, folder_name, status: "not_prepared".to_owned(), document_id: Some(doc_id), section_count: None, progress_percent: None, reason: Some("No readable sections were found for this document.".to_owned()), display });
             continue;
         };
         let section_count = fs::read_to_string(path.join("sources").join("sections").join(&doc_id).join("sections.jsonl")).map(|raw| raw.lines().count()).ok();
-        targets.insert(id.clone(), BookTarget { doc_id: doc_id.clone(), section_id });
-        books.push(LibraryBook { id, title, folder_name, status: "ready".to_owned(), document_id: Some(doc_id), section_count, progress_percent: None, reason: None });
+        targets.insert(id.clone(), BookTarget { doc_id: doc_id.clone(), section_id, api_base_url: None });
+        let progress_percent = reading_progress_percent(&path, &doc_id);
+        books.push(LibraryBook { id, title, folder_name, status: "ready".to_owned(), document_id: Some(doc_id), section_count, progress_percent, reason: None, display });
     }
     books.sort_by(|left, right| left.title.to_lowercase().cmp(&right.title.to_lowercase()));
     Ok(LibraryInventory { library_name, books })
 }
 
-fn start_reader_server(workspace: &Path, state: &DesktopState) -> Result<(), String> {
+#[tauri::command]
+fn remove_book(book_id: String, app: AppHandle, state: State<DesktopState>) -> Result<(), String> {
+    let workspace = state.book_workspaces.lock().map_err(|_| "Unable to access library state.".to_owned())?
+        .get(&book_id).cloned().ok_or_else(|| "Book is unavailable. Rescan your library and try again.".to_owned())?;
+    let settings = read_settings(&app)?;
+    let root = canonical_directory(Path::new(settings.library_root.as_deref().ok_or_else(|| "Choose a library folder first.".to_owned())?))?;
+    let workspace = workspace.canonicalize().map_err(|_| "Book workspace is no longer available.".to_owned())?;
+    if workspace.parent() != Some(root.as_path()) {
+        return Err("Only an immediate book workspace inside your library can be removed.".to_owned());
+    }
+    let status = Command::new("gio").arg("trash").arg(&workspace).status()
+        .map_err(|error| format!("Unable to move this book to Trash: {error}"))?;
+    if !status.success() { return Err("Unable to move this book to Trash.".to_owned()); }
+    state.open_books.lock().map_err(|_| "Unable to update library state.".to_owned())?.remove(&book_id);
+    state.book_workspaces.lock().map_err(|_| "Unable to update library state.".to_owned())?.remove(&book_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn enrich_book_metadata(book_id: String, force: Option<bool>, app: AppHandle, state: State<'_, DesktopState>) -> Result<serde_json::Value, String> {
+    let workspace = state.book_workspaces.lock().map_err(|_| "Unable to access library state.".to_owned())?.get(&book_id).cloned().ok_or_else(|| "Book workspace is unavailable. Rescan the library.".to_owned())?;
+    let settings = read_settings(&app)?;
+    let api_key = credential_entry()?.get_password().map_err(|_| "Add your AI API key in BookGraph settings to fill book details.".to_owned())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let bookgraph_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../bookgraph");
+        let provider = if settings.provider.trim().is_empty() { DEFAULT_TRANSLATION_PROVIDER } else { settings.provider.as_str() };
+        let base = if settings.provider_base_url.trim().is_empty() { DEFAULT_TRANSLATION_BASE_URL } else { settings.provider_base_url.trim() };
+        let model = if settings.model.trim().is_empty() { DEFAULT_TRANSLATION_MODEL } else { settings.model.trim() };
+        let mut command = Command::new("uv");
+        command.arg("--directory").arg(bookgraph_root).args(["run", "--extra", "parsers", "bookgraph", "book-metadata"]).arg(workspace).arg("--ai")
+            .env("BOOKGRAPH_TRANSLATION_API_KEY", api_key)
+            .env("BOOKGRAPH_TRANSLATION_PROVIDER", provider)
+            .env("BOOKGRAPH_TRANSLATION_BASE_URL", base)
+            .env("BOOKGRAPH_TRANSLATION_MODEL", model);
+        if force.unwrap_or(false) { command.arg("--force"); }
+        let output = command.output().map_err(|error| format!("Unable to start book details: {error}"))?;
+        if !output.status.success() { return Err("Unable to fill book details. Check the book workspace and retry.".to_owned()); }
+        serde_json::from_slice(&output.stdout).map_err(|_| "Book details returned an invalid response.".to_owned())
+    }).await.map_err(|error| format!("Book details could not finish: {error}"))?
+}
+
+fn reader_command(workspace: &Path, settings: &AppSettings, api_key: &str, port: u16) -> Command {
+    let bookgraph_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../bookgraph");
+    let provider = if settings.provider.trim().is_empty() { DEFAULT_TRANSLATION_PROVIDER } else { settings.provider.as_str() };
+    let base = if settings.provider_base_url.trim().is_empty() { DEFAULT_TRANSLATION_BASE_URL } else { settings.provider_base_url.trim() };
+    let model = if settings.model.trim().is_empty() { DEFAULT_TRANSLATION_MODEL } else { settings.model.trim() };
+    let mut command = Command::new("uv");
+    command.arg("--directory").arg(bookgraph_root)
+        .arg("run").arg("--extra").arg("http")
+        .arg("bookgraph").arg("serve-http")
+        .arg(workspace).arg("--host").arg("127.0.0.1").arg("--port").arg(port.to_string())
+        .args(["--allowed-origin", "http://localhost:5173", "--allowed-origin", "http://127.0.0.1:5173", "--allowed-origin", "tauri://localhost", "--allowed-origin", "http://tauri.localhost"])
+        // Credentials are passed only to the owned Python sidecar, never command-line args.
+        .env("BOOKGRAPH_TRANSLATION_API_KEY", api_key)
+        .env("BOOKGRAPH_TRANSLATION_PROVIDER", provider)
+        .env("BOOKGRAPH_TRANSLATION_BASE_URL", base)
+        .env("BOOKGRAPH_TRANSLATION_MODEL", model);
+    command
+}
+
+fn start_reader_server(workspace: &Path, state: &DesktopState, settings: &AppSettings) -> Result<String, String> {
+    let api_key = credential_entry()?.get_password()
+        .map_err(|error| match error {
+            keyring::Error::NoEntry => "Add a translation API key in BookGraph settings before translating.".to_owned(),
+            _ => format!("Unable to read the translation API key from secure storage: {error}"),
+        })?;
+    if api_key.trim().is_empty() {
+        return Err("Add a translation API key in BookGraph settings before translating.".to_owned());
+    }
+
     let mut server = state.reader_server.lock().map_err(|_| "Unable to access reader server state.".to_owned())?;
     if let Some(mut existing) = server.take() {
         let _ = existing.kill();
         let _ = existing.wait();
     }
-    let bookgraph_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../bookgraph");
-    let child = Command::new("uv")
-        .arg("--directory").arg(bookgraph_root)
-        .arg("run").arg("--extra").arg("http")
-        .arg("bookgraph").arg("serve-http")
-        .arg(workspace).arg("--host").arg("127.0.0.1").arg("--port").arg("8000")
+    // Each desktop instance owns its endpoint instead of reusing an unrelated
+    // server on port 8000 that may have a different workspace or no credential.
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("Unable to reserve a local reader port: {error}"))?;
+    let address = listener.local_addr().map_err(|error| error.to_string())?;
+    drop(listener);
+    let base_url = format!("http://{address}");
+    let mut child = reader_command(workspace, settings, &api_key, address.port())
         .spawn().map_err(|error| format!("Unable to start the local BookGraph reader service: {error}"))?;
-    *server = Some(child);
-    drop(server);
-    for _ in 0..30 {
-        if TcpStream::connect("127.0.0.1:8000").is_ok() { return Ok(()); }
-        thread::sleep(Duration::from_millis(150));
+    for _ in 0..120 {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            return Err(format!("The local BookGraph reader service exited before it was ready ({status})."));
+        }
+        if TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok() {
+            *server = Some(child);
+            *state.reader_base_url.lock().map_err(|_| "Unable to access reader endpoint.".to_owned())? = Some(base_url.clone());
+            return Ok(base_url);
+        }
+        thread::sleep(Duration::from_millis(100));
     }
+    let _ = child.kill();
+    let _ = child.wait();
     Err("The local BookGraph reader service did not start in time.".to_owned())
 }
 
 #[tauri::command]
 fn open_book(book_id: String, app: AppHandle, state: State<DesktopState>) -> Result<BookTarget, String> {
-    let target = state.open_books.lock().map_err(|_| "Unable to access library state.".to_owned())?.get(&book_id).cloned().ok_or_else(|| "Book is unavailable. Rescan your library and try again.".to_owned())?;
+    let mut target = state.open_books.lock().map_err(|_| "Unable to access library state.".to_owned())?.get(&book_id).cloned().ok_or_else(|| "Book is unavailable. Rescan your library and try again.".to_owned())?;
     let workspace = state.book_workspaces.lock().map_err(|_| "Unable to access library state.".to_owned())?.get(&book_id).cloned().ok_or_else(|| "Book workspace is unavailable. Rescan your library and try again.".to_owned())?;
-    start_reader_server(&workspace, &state)?;
-    let _ = app;
+    let settings = read_settings(&app)?;
+    target.api_base_url = Some(start_reader_server(&workspace, &state, &settings)?);
     Ok(target)
 }
 
 #[tauri::command]
 fn back_to_library(state: State<DesktopState>) {
+    if let Ok(mut url) = state.reader_base_url.lock() { *url = None; }
     if let Ok(mut server) = state.reader_server.lock() {
         if let Some(mut child) = server.take() {
             let _ = child.kill();
@@ -429,7 +581,40 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(DesktopState::default())
-        .invoke_handler(tauri::generate_handler![get_app_settings, save_app_settings, get_credential_status, save_translation_api_key, delete_translation_api_key, select_profile_image, select_book_pdf, select_library_root, prepare_mineru_book, get_mineru_workspace_info, open_mineru_web, open_local_folder, organize_mineru_results, create_library_folder, scan_library, open_book, back_to_library])
+        .invoke_handler(tauri::generate_handler![get_reader_api_base_url, get_app_settings, save_app_settings, get_credential_status, save_translation_api_key, delete_translation_api_key, select_profile_image, select_book_pdf, select_library_root, prepare_mineru_book, get_mineru_workspace_info, open_mineru_web, open_local_folder, organize_mineru_results, create_library_folder, scan_library, remove_book, enrich_book_metadata, open_book, back_to_library])
         .run(tauri::generate_context!())
         .expect("error while running BookGraph desktop application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reader_passes_credentials_and_selected_provider_to_its_owned_port() {
+        let mut settings = AppSettings::default();
+        settings.provider = "anthropic-compatible".to_owned();
+        settings.provider_base_url = "https://example.invalid/v1".to_owned();
+        settings.model = "test-model".to_owned();
+        let command = reader_command(Path::new("/tmp/test-book"), &settings, "test-canary-not-a-real-key", 54321);
+        let env: HashMap<_, _> = command.get_envs().filter_map(|(key, value)| value.map(|value| (key.to_string_lossy().into_owned(), value.to_string_lossy().into_owned()))).collect();
+        assert_eq!(env.get("BOOKGRAPH_TRANSLATION_API_KEY").map(String::as_str), Some("test-canary-not-a-real-key"));
+        assert_eq!(env.get("BOOKGRAPH_TRANSLATION_PROVIDER").map(String::as_str), Some("anthropic-compatible"));
+        assert_eq!(env.get("BOOKGRAPH_TRANSLATION_BASE_URL").map(String::as_str), Some("https://example.invalid/v1"));
+        assert_eq!(env.get("BOOKGRAPH_TRANSLATION_MODEL").map(String::as_str), Some("test-model"));
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        assert!(args.windows(2).any(|pair| pair == ["--port", "54321"]));
+        assert!(!args.iter().any(|arg| arg.contains("canary")));
+    }
+
+    #[test]
+    #[ignore = "requires the logged-in user's OS credential store"]
+    fn credential_store_persists_across_new_entries() {
+        let service = format!("com.bookgraph.reader.canary.{}", std::process::id());
+        let entry = Entry::new(&service, "test-only").expect("credential entry");
+        entry.set_password("test-canary-not-a-real-key").expect("save canary");
+        let loaded = Entry::new(&service, "test-only").expect("new credential entry").get_password();
+        entry.delete_credential().expect("delete canary");
+        assert_eq!(loaded.expect("read canary from new entry"), "test-canary-not-a-real-key");
+    }
 }
