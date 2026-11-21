@@ -597,12 +597,15 @@ fn back_to_library(state: State<DesktopState>) {
 }
 
 #[cfg(target_os = "linux")]
-fn integrate_appimage(app: &AppHandle) -> Result<(), String> {
+fn integrate_appimage() -> Result<(), String> {
     let Some(image) = std::env::var_os("APPIMAGE") else { return Ok(()); };
     let image = PathBuf::from(image).canonicalize().map_err(|e| e.to_string())?;
     let image = image.to_string_lossy();
     if image.contains(['\n', '\r']) { return Err("Unsupported AppImage path".to_owned()); }
-    let data = app.path().data_dir().map_err(|e| e.to_string())?;
+    let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+        .ok_or_else(|| "User data directory is unavailable".to_owned())?;
     let icons = data.join("icons/hicolor/512x512/apps");
     let applications = data.join("applications");
     fs::create_dir_all(&icons).map_err(|e| e.to_string())?;
@@ -626,17 +629,15 @@ fn integrate_appimage(app: &AppHandle) -> Result<(), String> {
 }
 
 fn main() {
+    // Register before GTK creates the first window so Wayland can resolve its app ID.
+    #[cfg(target_os = "linux")]
+    if let Err(error) = integrate_appimage() {
+        eprintln!("Unable to register BookGraph desktop icon: {error}");
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(DesktopState::default())
-        .setup(|app| {
-            #[cfg(target_os = "linux")]
-            if let Err(error) = integrate_appimage(app.handle()) {
-                eprintln!("Unable to register BookGraph desktop icon: {error}");
-            }
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![get_reader_api_base_url, get_app_settings, save_app_settings, get_credential_status, save_translation_api_key, delete_translation_api_key, select_profile_image, select_book_pdf, select_library_root, prepare_mineru_book, get_mineru_workspace_info, open_mineru_web, open_local_folder, organize_mineru_results, create_library_folder, scan_library, remove_book, enrich_book_metadata, open_book, back_to_library])
         .build(tauri::generate_context!())
         .expect("error while building BookGraph desktop application")
