@@ -1,0 +1,8 @@
+/build/
+/releases/
+/fumadocs-editor-dev/apps/reader/src-tauri/binaries/
+/fumadocs-editor-dev/apps/reader/src-tauri/target/
+/fumadocs-editor-dev/apps/reader/dist/
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/

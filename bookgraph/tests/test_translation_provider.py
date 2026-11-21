@@ -73,3 +73,61 @@ def test_configured_provider_selects_anthropic_provider_from_environment(
     )
 
     assert isinstance(provider, AnthropicCompatibleTranslationProvider)
+
+
+def test_anthropic_translation_rejects_output_cut_off_by_token_limit() -> None:
+    import pytest
+
+    from bookgraph.mcp.errors import ReadingServiceError
+
+    config = TranslationProviderConfig("anthropic-compatible", "https://example.test", "model", 120)
+    response = {"stop_reason": "max_tokens", "content": [{"type": "text", "text": "Partial"}]}
+    with patch("bookgraph.translation_provider._request_json", return_value=response):
+        with pytest.raises(ReadingServiceError, match="truncated"):
+            AnthropicCompatibleTranslationProvider(config, "secret").translate_section(
+                "Source", target_language="vi"
+            )
+
+
+def test_openai_translation_rejects_output_cut_off_by_token_limit() -> None:
+    import pytest
+
+    from bookgraph.mcp.errors import ReadingServiceError
+    from bookgraph.translation_provider import OpenAICompatibleTranslationProvider
+
+    config = TranslationProviderConfig("openai-compatible", "https://example.test", "model", 120)
+    response = {"choices": [{"finish_reason": "length", "message": {"content": "Partial"}}]}
+    with patch("bookgraph.translation_provider._request_json", return_value=response):
+        with pytest.raises(ReadingServiceError, match="truncated"):
+            OpenAICompatibleTranslationProvider(config, "secret").translate_section(
+                "Source", target_language="vi"
+            )
+
+
+def test_book_metadata_provider_extracts_json_and_bounds_the_excerpt() -> None:
+    from bookgraph.translation_provider import OpenAICompatibleTranslationProvider
+
+    result = {"title": "Real Book", "authors": ["Jane Doe"], "editors": [],
+              "publisher": None, "publication_year": 2024}
+    config = TranslationProviderConfig("openai-compatible", "https://example.test", "model", 60)
+    response = {"choices": [{"message": {"content": json.dumps(result)}}]}
+    with patch("bookgraph.translation_provider._request_json", return_value=response) as request:
+        value = OpenAICompatibleTranslationProvider(config, "secret").extract_book_metadata("x" * 30000)
+    assert value == result
+    payload = json.loads(request.call_args.args[0].data)
+    assert len(payload["messages"][1]["content"]) < 20100
+    assert "do not browse, guess" in payload["messages"][0]["content"]
+    assert payload["max_tokens"] == 1200
+
+
+def test_book_metadata_provider_rejects_invalid_names_and_empty_responses() -> None:
+    import pytest
+
+    from bookgraph.mcp.errors import ReadingServiceError
+    from bookgraph.translation_provider import _metadata_result
+
+    with pytest.raises(ReadingServiceError, match="empty"):
+        _metadata_result(None)  # type: ignore[arg-type]
+    with pytest.raises(ReadingServiceError, match="invalid names"):
+        _metadata_result(json.dumps({"title": "Book", "authors": "Invented", "editors": [],
+                                    "publisher": None, "publication_year": None}))

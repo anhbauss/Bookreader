@@ -10,9 +10,9 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from bookgraph.formula_repairs import accept_repair, get_accepted_repair, repair_content
+from bookgraph.formula_repairs import RepairKind, accept_repair, get_accepted_repair, repair_content
 from bookgraph.mcp import service
 from bookgraph.mcp.errors import (
     ConceptNotFoundError,
@@ -22,6 +22,7 @@ from bookgraph.mcp.errors import (
     SectionNotFoundError,
     SectionsNotFoundError,
 )
+from bookgraph.repair_jobs import get_repair_job, start_repair_job
 from bookgraph.utils import validate_slug_id
 from bookgraph.workspace import WorkspacePaths
 
@@ -33,11 +34,25 @@ _ALLOWED_IMAGE_TYPES = {
 }
 
 
-def create_app(workspace: WorkspacePaths) -> Any:
-    """Create the optional ASGI app without leaking Starlette into core service code."""
+def create_app(
+    workspace: WorkspacePaths,
+    *,
+    bearer_token: str | None = None,
+    allowed_origins: tuple[str, ...] | None = None,
+) -> Any:
+    """Create the optional ASGI app without leaking Starlette into core service code.
+
+    ``bearer_token`` is intended for a desktop host that launches this server on a
+    loopback port. It is deliberately optional so the Vite development proxy and
+    existing command-line workflow remain usable. A packaged desktop application
+    must supply a freshly generated token.
+    """
 
     try:
         from starlette.applications import Starlette
+        from starlette.concurrency import run_in_threadpool
+        from starlette.middleware import Middleware
+        from starlette.middleware.base import BaseHTTPMiddleware
         from starlette.middleware.cors import CORSMiddleware
         from starlette.requests import Request
         from starlette.responses import FileResponse, JSONResponse
@@ -59,6 +74,13 @@ def create_app(workspace: WorkspacePaths) -> Any:
             return _error(JSONResponse, 404, "not_found", str(exc))
         except ReadingServiceError as exc:
             return _error(JSONResponse, 400, "service_error", str(exc))
+
+    async def authorize(request: Request, call_next: Callable[[Request], Any]) -> Any:
+        if bearer_token is not None:
+            expected = f"Bearer {bearer_token}"
+            if request.headers.get("authorization") != expected:
+                return _error(JSONResponse, 401, "unauthorized", "Authentication is required.")
+        return await call_next(request)
 
     async def documents(_request: Request) -> Any:
         return response(lambda: service.list_documents(workspace))
@@ -93,6 +115,16 @@ def create_app(workspace: WorkspacePaths) -> Any:
 
     async def plans(_request: Request) -> Any:
         return response(lambda: service.list_plans(workspace))
+
+    async def document_progress(request: Request) -> Any:
+        return response(
+            lambda: service.get_document_progress(workspace, request.path_params["doc_id"])
+        )
+
+    async def complete_document(request: Request) -> Any:
+        return response(
+            lambda: service.complete_document_reading(workspace, request.path_params["doc_id"])
+        )
 
     async def plan_progress(request: Request) -> Any:
         return response(
@@ -216,18 +248,41 @@ def create_app(workspace: WorkspacePaths) -> Any:
                 raise ReadingServiceError("Request body must contain content, optional text context, and a valid kind.")
             return JSONResponse(
                 _public_view(
-                    repair_content(
-                        workspace,
+                    await run_in_threadpool(
+                        repair_content, workspace,
                         request.path_params["doc_id"],
                         request.path_params["section_id"],
                         formula,
                         context,
-                        kind,
+                        cast(RepairKind, kind),
                     )
                 )
             )
         except ReadingServiceError as exc:
             return _error(JSONResponse, 400, "service_error", str(exc))
+
+    async def start_section_repair(request: Request) -> Any:
+        try:
+            payload = await request.json()
+            content = payload.get("content") if isinstance(payload, dict) else None
+            context = payload.get("context", "") if isinstance(payload, dict) else ""
+            kind = payload.get("kind", "formula") if isinstance(payload, dict) else "formula"
+            if (not isinstance(content, str) or not isinstance(context, str)
+                    or kind not in {"formula", "markdown", "region"}):
+                raise ReadingServiceError("Invalid repair request.")
+            job = start_repair_job(
+                workspace, request.path_params["doc_id"], request.path_params["section_id"],
+                content, context, cast(RepairKind, kind),
+            )
+            return JSONResponse(_public_view(job), status_code=202)
+        except ReadingServiceError as exc:
+            return _error(JSONResponse, 400, "service_error", str(exc))
+
+    async def section_repair_job(request: Request) -> Any:
+        return response(lambda: get_repair_job(
+            workspace, request.path_params["doc_id"], request.path_params["section_id"],
+            request.path_params["job_id"],
+        ))
 
     async def accepted_section_repair(request: Request) -> Any:
         return response(
@@ -269,6 +324,8 @@ def create_app(workspace: WorkspacePaths) -> Any:
 
     routes = [
         Route("/api/documents", documents, methods=["GET"]),
+        Route("/api/documents/{doc_id:str}/progress", document_progress, methods=["GET"]),
+        Route("/api/documents/{doc_id:str}/complete", complete_document, methods=["POST"]),
         Route(
             "/api/documents/{doc_id:str}/sections/{section_id:str}", section, methods=["GET"]
         ),
@@ -324,6 +381,14 @@ def create_app(workspace: WorkspacePaths) -> Any:
             methods=["POST"],
         ),
         Route(
+            "/api/documents/{doc_id:str}/sections/{section_id:str}/repair-jobs",
+            start_section_repair, methods=["POST"],
+        ),
+        Route(
+            "/api/documents/{doc_id:str}/sections/{section_id:str}/repair-jobs/{job_id:str}",
+            section_repair_job, methods=["GET"],
+        ),
+        Route(
             "/api/documents/{doc_id:str}/sections/{section_id:str}/formula-repairs/accepted",
             accepted_section_repair,
             methods=["GET"],
@@ -336,11 +401,15 @@ def create_app(workspace: WorkspacePaths) -> Any:
         Route("/api/concepts/{concept:str}", concept, methods=["GET"]),
         Route("/api/assets/{doc_id:str}/{basename:str}", asset, methods=["GET"]),
     ]
+    origins = allowed_origins or ("http://127.0.0.1:5173", "http://localhost:5173")
     return CORSMiddleware(
-        Starlette(routes=routes),
-        allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+        Starlette(
+            routes=routes,
+            middleware=[Middleware(BaseHTTPMiddleware, dispatch=authorize)],
+        ),
+        allow_origins=list(origins),
         allow_methods=["GET", "POST"],
-        allow_headers=[],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
 
@@ -349,6 +418,8 @@ def _section_view(workspace: WorkspacePaths, doc_id: str, section_id: str) -> di
 
     view = service.get_section(workspace, doc_id, section_id, include_assets=True)
     payload = view.model_dump()
+    if view.id != section_id:
+        payload["redirected_from"] = section_id
     payload["assets"] = [
         {
             **{key: value for key, value in asset.items() if key not in {"path", "link"}},

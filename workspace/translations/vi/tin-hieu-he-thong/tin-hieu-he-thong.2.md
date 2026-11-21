@@ -1,1 +1,0 @@
-I'm ready to translate, but I don't see the source content between the markers. Could you provide the section you'd like translated to Vietnamese?

@@ -35,7 +35,9 @@ from bookgraph.mcp.query_tools import (
     search_sections,
 )
 from bookgraph.mcp.reading_tools import (
+    complete_document_reading,
     create_plan,
+    get_document_progress,
     get_next_section,
     get_plan_progress,
     get_section,
@@ -130,6 +132,7 @@ __all__ = [
     "get_chapter_outline",
     "get_concept",
     "get_context",
+    "get_document_progress",
     "get_next_section",
     "get_outline",
     "get_plan_progress",

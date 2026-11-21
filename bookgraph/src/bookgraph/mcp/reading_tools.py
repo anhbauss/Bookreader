@@ -93,6 +93,28 @@ def get_next_section(
     )
 
 
+def get_document_progress(workspace: WorkspacePaths, doc_id: str) -> PlanProgress:
+    """Resume a reader's default plan, creating it on first use for sectioned books."""
+    from bookgraph.cli._config import load_config
+
+    resolved_doc_id = _validate_id(doc_id, "doc_id")
+    path = _plan_path(workspace, resolved_doc_id)
+    if not path.exists():
+        # Validate the book before creating any plan artifacts. Recheck under the
+        # same lock as mark_read so simultaneous opens cannot reset completion.
+        sections = _load_doc_sections(workspace, resolved_doc_id)
+        with plan_lock(path):
+            if not path.exists():
+                plan = create_reading_plan(
+                    sections,
+                    plan_id=resolved_doc_id,
+                    doc_id=resolved_doc_id,
+                    daily_sections=load_config(workspace).reading_plan.daily_sections,
+                )
+                write_reading_plan(plan, path)
+    return get_plan_progress(workspace, resolved_doc_id)
+
+
 def get_plan_progress(
     workspace: WorkspacePaths, plan_id: str, chapter_level: int | None = None
 ) -> PlanProgress:
@@ -167,6 +189,26 @@ def mark_read(
     )
 
 
+def complete_document_reading(workspace: WorkspacePaths, doc_id: str) -> MarkReadResult:
+    """Mark every section in a document's default reading plan as complete."""
+
+    resolved_doc_id = _validate_id(doc_id, "doc_id")
+    get_document_progress(workspace, resolved_doc_id)
+    path = _plan_path(workspace, resolved_doc_id)
+    with plan_lock(path):
+        _, plan = _load_plan(workspace, resolved_doc_id)
+        updated = plan.model_copy(update={"completed": list(plan.section_ids)})
+        write_reading_plan(updated, path)
+    total = len(updated.section_ids)
+    return MarkReadResult(
+        plan_id=updated.plan_id,
+        marked="*",
+        completed=total,
+        total=total,
+        done=True,
+    )
+
+
 # --- Workspace orientation & reading-plan management -----------------------------
 #
 # Self-serve tools so a reading agent connected over MCP can discover what there is
@@ -178,6 +220,11 @@ def mark_read(
 def _document_title(workspace: WorkspacePaths, doc_id: str) -> str:
     """The parsed document's title, falling back to ``doc_id``."""
 
+    from bookgraph.book_metadata import read_book_metadata
+
+    metadata = read_book_metadata(workspace, doc_id)
+    if metadata is not None:
+        return metadata.title
     path = workspace.sources_parsed / doc_id / "document.json"
     try:
         payload = json.loads(path.read_text())
@@ -190,6 +237,8 @@ def _document_title(workspace: WorkspacePaths, doc_id: str) -> str:
 def list_documents(workspace: WorkspacePaths) -> DocumentList:
     """List the workspace's segmented documents (what an agent can read)."""
 
+    from bookgraph.book_metadata import read_book_metadata
+
     documents: list[DocumentRef] = []
     for doc_id in _segmented_doc_ids(workspace):
         manifest = workspace.sources_sections / doc_id / "sections.jsonl"
@@ -197,11 +246,14 @@ def list_documents(workspace: WorkspacePaths) -> DocumentList:
             section_count = count_sections(manifest)
         except OSError:
             continue  # a manifest that vanished/broke between listing and read
+        metadata = read_book_metadata(workspace, doc_id)
         documents.append(
             DocumentRef(
                 doc_id=doc_id,
                 title=_document_title(workspace, doc_id),
                 section_count=section_count,
+                authors=metadata.authors if metadata else [],
+                editors=metadata.editors if metadata else [],
             )
         )
     return DocumentList(documents=documents)

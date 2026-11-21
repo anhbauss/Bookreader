@@ -240,8 +240,14 @@ def _plan_path(workspace: WorkspacePaths, plan_id: str) -> Path:
 def _find_section(workspace: WorkspacePaths, doc_id: str, section_id: str) -> Section:
     """Look up a section by membership (rejects unknown and traversal ids)."""
 
-    for section in _load_doc_sections(workspace, doc_id):
+    sections = _load_doc_sections(workspace, doc_id)
+    for section in sections:
         if section.id == section_id:
+            return section
+    from bookgraph.section_structure import merged_ids
+
+    for section in sections:
+        if section_id in merged_ids(section):
             return section
     raise SectionNotFoundError(f"Section '{section_id}' not found in document '{doc_id}'.")
 

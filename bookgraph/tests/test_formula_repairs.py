@@ -54,3 +54,22 @@ def test_formula_repair_rejects_html_or_unbalanced_provider_output(tmp_path: Pat
     with patch("bookgraph.formula_repairs.configured_provider", return_value=provider):
         with pytest.raises(ReadingServiceError, match="invalid TeX"):
             repair_formula(workspace, "signals", "signals.intro", r"\frac{1{2}", "")
+
+
+def test_repair_does_not_publish_a_candidate_after_source_changes(tmp_path: Path) -> None:
+    from bookgraph.formula_repairs import repair_content
+
+    workspace = _workspace(tmp_path)
+    provider = MagicMock()
+
+    def changed(content: str, *, context: str) -> tuple[str, str]:
+        write_sections([Section(id="signals.intro", doc_id="signals", title="Changed", level=1,
+                                heading_path=["Changed"], text="New source.")],
+                       workspace.sources_sections / "signals")
+        return "Introduction", "Repaired old source."
+
+    provider.repair_markdown.side_effect = changed
+    with patch("bookgraph.formula_repairs.configured_provider", return_value=provider):
+        with pytest.raises(ReadingServiceError, match="changed during repair"):
+            repair_content(workspace, "signals", "signals.intro", "Equation.", "", "markdown")
+    assert not list(workspace.formula_repairs_root.rglob("*.json"))

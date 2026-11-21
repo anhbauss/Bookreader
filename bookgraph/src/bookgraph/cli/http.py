@@ -19,6 +19,14 @@ def serve_http(
         str, typer.Option("--host", help="Bind host; default is loopback only.")
     ] = "127.0.0.1",
     port: Annotated[int, typer.Option("--port", help="Bind port.")] = 8000,
+    bearer_token: Annotated[
+        str | None,
+        typer.Option("--bearer-token", help="Require this bearer token for every request."),
+    ] = None,
+    allowed_origin: Annotated[
+        list[str] | None,
+        typer.Option("--allowed-origin", help="Allowed CORS origin; repeat for multiple origins."),
+    ] = None,
 ) -> None:
     """Serve browser-safe read endpoints and reading-plan progress over REST."""
 
@@ -31,4 +39,9 @@ def serve_http(
             "HTTP API requires the 'http' extra: install bookgraph[http]"
         ) from exc
     workspace = WorkspacePaths(workspace_path.expanduser().resolve())
-    uvicorn.run(create_app(workspace), host=host, port=port)
+    origins = tuple(allowed_origin) if allowed_origin else None
+    uvicorn.run(
+        create_app(workspace, bearer_token=bearer_token, allowed_origins=origins),
+        host=host,
+        port=port,
+    )
