@@ -43,6 +43,22 @@ jobs:
       - name: Build installer
         working-directory: fumadocs-editor-dev/apps/reader
         run: pnpm exec tauri build --config src-tauri/tauri.release.conf.json --bundles ${{ matrix.bundles }}
+      - name: Verify installed Windows service
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem fumadocs-editor-dev/apps/reader/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $destination = "$env:RUNNER_TEMP\BookGraphInstalled"
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList "/S", "/D=$destination" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          python scripts/release/smoke_service.py "$destination\bookgraph-service.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Installed service smoke check failed" }
+      - name: Verify Linux package contents
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p build/installed
+          dpkg-deb -x fumadocs-editor-dev/apps/reader/src-tauri/target/release/bundle/deb/*.deb build/installed
+          python scripts/release/smoke_service.py build/installed/usr/bin/bookgraph-service
       - uses: actions/upload-artifact@v4
         with:
           name: BookGraph-${{ runner.os }}-installers
