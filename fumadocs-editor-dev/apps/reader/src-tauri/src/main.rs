@@ -596,11 +596,47 @@ fn back_to_library(state: State<DesktopState>) {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn integrate_appimage(app: &AppHandle) -> Result<(), String> {
+    let Some(image) = std::env::var_os("APPIMAGE") else { return Ok(()); };
+    let image = PathBuf::from(image).canonicalize().map_err(|e| e.to_string())?;
+    let image = image.to_string_lossy();
+    if image.contains(['\n', '\r']) { return Err("Unsupported AppImage path".to_owned()); }
+    let data = app.path().data_dir().map_err(|e| e.to_string())?;
+    let icons = data.join("icons/hicolor/512x512/apps");
+    let applications = data.join("applications");
+    fs::create_dir_all(&icons).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&applications).map_err(|e| e.to_string())?;
+    let icon = include_bytes!("../icons/icon.png");
+    let icon_path = icons.join("bookgraph-desktop.png");
+    if fs::read(&icon_path).ok().as_deref() != Some(icon.as_slice()) {
+        fs::write(&icon_path, icon).map_err(|e| e.to_string())?;
+    }
+    let escaped = image.replace('\\', "\\\\").replace('"', "\\\"")
+        .replace('`', "\\`").replace('$', "\\$").replace('%', "%%");
+    let entry = format!("[Desktop Entry]\nType=Application\nName=BookGraph\nExec=\"{escaped}\"\nIcon=bookgraph-desktop\nTerminal=false\nCategories=Education;\nStartupWMClass=bookgraph-desktop\nStartupNotify=true\n");
+    let desktop = applications.join("bookgraph-desktop.desktop");
+    if fs::read_to_string(&desktop).ok().as_deref() != Some(entry.as_str()) {
+        fs::write(desktop, entry).map_err(|e| e.to_string())?;
+        let _ = Command::new("update-desktop-database").arg(&applications).status();
+    }
+    let _ = Command::new("gtk-update-icon-cache").args(["-f", "-t"])
+        .arg(data.join("icons/hicolor")).status();
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(DesktopState::default())
+        .setup(|app| {
+            #[cfg(target_os = "linux")]
+            if let Err(error) = integrate_appimage(app.handle()) {
+                eprintln!("Unable to register BookGraph desktop icon: {error}");
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![get_reader_api_base_url, get_app_settings, save_app_settings, get_credential_status, save_translation_api_key, delete_translation_api_key, select_profile_image, select_book_pdf, select_library_root, prepare_mineru_book, get_mineru_workspace_info, open_mineru_web, open_local_folder, organize_mineru_results, create_library_folder, scan_library, remove_book, enrich_book_metadata, open_book, back_to_library])
         .build(tauri::generate_context!())
         .expect("error while building BookGraph desktop application")
