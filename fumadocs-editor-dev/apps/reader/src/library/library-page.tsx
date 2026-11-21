@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { completeDocumentReading, getTranslationCoverage, startTranslationCoverage } from "../api";
 import { desktopApi, localFileUrl, signOutDesktop, type AppSettings, type LibraryBook, type LibraryInventory, type MinerUPreparation } from "../desktop";
 import "./library.css";
+import { BookGraphBrand } from "../bookgraph-brand";
 import { ProfileMenu } from "./profile-menu";
 
 function messageFrom(reason: unknown, fallback: string): string {
@@ -262,7 +263,7 @@ export function LibraryPage({ settings, onOpenBook, onSettingsChanged }: {
   }, [books.length, loading]);
   const moveBookRail = (direction: -1 | 1) => bookRail.current?.scrollBy({ left: direction * bookRail.current.clientWidth * 0.82, behavior: "smooth" });
   return <div className="library-page" id="library">
-    <header className="library-topbar"><div className="library-topbar-inner"><a className="library-brand" href="?" aria-label="BookGraph Library"><BookOpen size={21} strokeWidth={1.8} /><span>BookGraph</span></a><nav className="library-nav" aria-label="Primary navigation"><a className="is-active" href="#library">Library</a></nav><div className="library-actions"><button className="library-rescan" type="button" disabled={loading} onClick={scan}><RefreshCw className={loading ? "spin" : ""} size={16} />Rescan</button><ProfileMenu displayName={settings.displayName} profileImagePath={settings.profileImagePath} disabled={action !== "idle"} onLogout={() => void logout()} /></div></div></header>
+    <header className="library-topbar"><div className="library-topbar-inner"><a className="library-brand" href="?" aria-label="BookGraph Library"><BookGraphBrand /></a><nav className="library-nav" aria-label="Primary navigation"><a className="is-active" href="#library">Library</a></nav><div className="library-actions"><button className="library-rescan" type="button" disabled={loading} onClick={scan}><RefreshCw className={loading ? "spin" : ""} size={16} />Rescan</button><ProfileMenu displayName={settings.displayName} profileImagePath={settings.profileImagePath} disabled={action !== "idle"} onLogout={() => void logout()} /></div></div></header>
     <main className="library-content">
       <section className="library-hero library-hero-compact"><div className="hero-copy"><p className="hero-eyebrow">YOUR LIBRARY</p><h1>Hello, {settings.displayName || "Reader"}.</h1><p className="hero-description">{settings.libraryRoot ? `Books from ${inventory?.libraryName ?? "your selected folder"}.` : "Choose a local folder to begin building your library."}</p></div><section className="reading-goal library-location"><div className="goal-header"><span>Library folder</span><button type="button" onClick={() => void chooseLibrary()} disabled={action !== "idle"}>{action === "choosing" ? "Opening…" : "Change"}</button></div><p>{settings.libraryRoot ? inventory?.libraryName ?? "Scanning…" : "Not selected"}</p></section></section>
       {error && <p className="library-error" role="alert">{error}</p>}{notice && <p className="library-notice" role="status">{notice}</p>}
