@@ -30,6 +30,9 @@ def main() -> None:
         uv,
         "pip",
         "install",
+        # Local source edits can keep the same package version and pyproject.toml.
+        # Never freeze a cached wheel from an earlier desktop build.
+        "--no-cache",
         "--python",
         str(python),
         str(ROOT / "bookgraph") + "[http,desktop]",

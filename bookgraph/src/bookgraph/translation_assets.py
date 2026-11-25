@@ -11,15 +11,23 @@ resolves under the parsed document, i.e. one ``get_section`` hands out as an
 staged cannot be linked or checked, so for those the writer's claim still stands;
 ``asset_missing`` and ``bookgraph assets repair`` own them.
 
+MinerU Markdown also renders some table crops as inline HTML instead of image
+links. Those tables count when the source's table blocks map unambiguously to its
+HTML tables in reading order and the translated body preserves each table exactly.
+
 :func:`check_translation_assets` is the one entry point the translation tools and the
 translated export share, so they judge the same body the same way.
 """
 
 from __future__ import annotations
 
+import re
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+
+from markdown_it import MarkdownIt
 
 from bookgraph.assets import asset_link, asset_reference, resolve_asset_path
 from bookgraph.models import (
@@ -29,6 +37,63 @@ from bookgraph.models import (
     Section,
 )
 from bookgraph.translation_structure import resolve_translation_image, structural_targets
+
+_MARKDOWN = MarkdownIt("commonmark", {"html": True})
+_HTML_TABLE = re.compile(r"<table\b[^>]*>[\s\S]*?</table\s*>", re.IGNORECASE)
+
+
+def _html_tables(markdown: str) -> list[str]:
+    """Read actual HTML blocks, excluding fenced/indented code and comments."""
+    return [
+        match.group()
+        for token in _MARKDOWN.parse(markdown)
+        if token.type == "html_block"
+        for match in _HTML_TABLE.finditer(re.sub(r"<!--[\s\S]*?-->", "", token.content))
+    ]
+
+
+def _inline_table_blocks(
+    section: Section, body: str, blocks: Mapping[str, CanonicalBlock],
+    *, root: Path, parsed_dir: Path,
+) -> set[str]:
+    """Accept only a one-to-one source mapping, never table counts alone.
+
+    MinerU's Markdown and canonical blocks share reading order. Table crops not
+    linked as images correspond to the HTML tables only when their counts agree.
+    Exact source HTML (including cell values and math) must survive in the body;
+    a repeated table cannot stand in for two source occurrences. Ambiguous mappings
+    fall back to requiring the crop image, as other parsers always do.
+    """
+    if section.metadata.get("reading_source") != "mineru-markdown":
+        return set()
+    source_tables = _html_tables(section.text)
+    if not source_tables:
+        return set()
+    source_images = {
+        resolved
+        for kind, target in structural_targets(section.text)
+        if kind == "image"
+        and (resolved := resolve_translation_image(root, target, [parsed_dir, root])) is not None
+    }
+    candidates: list[str] = []
+    for block_id in section.block_ids:
+        block = blocks.get(block_id)
+        if block is None or block.type != "table":
+            continue
+        path = resolve_asset_path(parsed_dir, block)
+        if path is None:
+            return set()
+        if Path(path).resolve() not in source_images:
+            candidates.append(block_id)
+    if len(candidates) != len(source_tables):
+        return set()
+    remaining = Counter(_html_tables(body))
+    carried = set()
+    for block_id, table in zip(candidates, source_tables, strict=True):
+        if remaining[table]:
+            remaining[table] -= 1
+            carried.add(block_id)
+    return carried
 
 
 @dataclass(frozen=True)
@@ -97,6 +162,9 @@ def check_translation_assets(
         if kind == "image"
         and (resolved := resolve_translation_image(root, target, bases)) is not None
     }
+    inline_tables = _inline_table_blocks(
+        section, body, blocks, root=root, parsed_dir=parsed_dir
+    )
     missing = [
         MissingTranslationAsset(
             block_id=block.id,
@@ -106,7 +174,7 @@ def check_translation_assets(
             caption=block.text,
         )
         for block, path in staged
-        if Path(path).resolve() not in linked
+        if Path(path).resolve() not in linked and block.id not in inline_tables
     ]
     return TranslationAssetCheck(missing=missing, unverified=unverified)
 

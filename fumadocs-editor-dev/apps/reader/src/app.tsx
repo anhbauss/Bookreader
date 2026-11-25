@@ -7,12 +7,7 @@ import {
   acceptSectionRepair,
   repairSectionContent,
   type ContentRepair,
-  getSectionTranslation,
-  getTranslationCoverage,
   markSectionRead,
-  retrySectionTranslation,
-  startTranslationCoverage,
-  translateNextSection,
   type SectionContext,
 } from "./api";
 import { loadDocumentMetadata, loadOutline, loadSection } from "./content";
@@ -20,8 +15,10 @@ import { MarkdownArticle, resolveBookGraphImageLinks } from "./markdown";
 import { MemoryPanel, ProgressPanel } from "./reader-panels";
 import { planIdForDocument, progressFromMarkRead, type MarkReadState, type ReaderProgressState } from "./reading";
 import { canonicalSectionId, sectionUrl, validateReaderRoute } from "./reader";
+import { useReadingPosition } from "./reading-position";
 import { CoveragePanel, ReadingModePicker, TranslationContent } from "./translation-panel";
-import { canShowTranslation, isSectionInsideCoverage, resolveReadingMode, type ReadingMode, type TranslationCoverageState, type TranslationState } from "./translation";
+import { canShowTranslation, resolveReadingMode, type ReadingMode } from "./translation";
+import { useSectionTranslation } from "./section-translation";
 import { LibraryPage } from "./library/library-page";
 import { desktopApi, isDesktopApp } from "./desktop";
 import { Onboarding, useDesktopBootstrap } from "./onboarding";
@@ -188,9 +185,10 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
   const [progressState, setProgressState] = useState<ReaderProgressState>({ status: "idle", progress: null, error: null });
   const [markState, setMarkState] = useState<MarkReadState>({ status: "idle", message: null });
   const [mode, setMode] = useState<ReadingMode>(() => resolveReadingMode(new URLSearchParams(window.location.search).get("mode")));
-  const [translationState, setTranslationState] = useState<TranslationState>({ status: "idle", translation: null, error: null });
-  const [coverageState, setCoverageState] = useState<TranslationCoverageState>({ status: "idle", coverage: null, error: null });
-  const [translationAction, setTranslationAction] = useState<"idle" | "starting" | "next">("idle");
+  const { translationState, coverageState, translationAction, startCoverage, requestCurrentTranslation } = useSectionTranslation(
+    location.docId, canonicalSectionId(location.docId, location.sectionId), TRANSLATION_LANGUAGE,
+    validateReaderRoute(location.docId, location.sectionId) === null,
+  );
   const [sectionRepairAction, setSectionRepairAction] = useState<"idle" | "repairing" | "failed">("idle");
   const [sectionRepairError, setSectionRepairError] = useState<string | null>(null);
   const [sectionRepairProgress, setSectionRepairProgress] = useState<{ current: number; total: number } | null>(null);
@@ -204,7 +202,12 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [insightsOpen, setInsightsOpen] = useState(false);
-  const [bookmarked, setBookmarked] = useState(false);
+  const bookmark = useReadingPosition(location.docId, canonicalSectionId(location.docId, location.sectionId), (id) => {
+    const target = new URLSearchParams(window.location.search);
+    target.set("section", new URLSearchParams(sectionUrl(location.docId, id)).get("section")!);
+    window.history.replaceState({}, "", `?${target.toString()}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
   const preferences = useReaderPreferences();
 
   useEffect(() => {
@@ -309,105 +312,13 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
     return () => { cancelled = true; };
   }, [location.docId, location.sectionId]);
 
-  useEffect(() => {
-    if (validateReaderRoute(location.docId, location.sectionId) !== null) return;
-    let cancelled = false;
-    setTranslationState({ status: "loading", translation: null, error: null });
-    void getSectionTranslation(location.docId, canonicalSectionId(location.docId, location.sectionId), TRANSLATION_LANGUAGE)
-      .then((translation) => { if (!cancelled) setTranslationState({ status: "ready", translation, error: null }); })
-      .catch((reason: unknown) => { if (!cancelled) setTranslationState({ status: "error", translation: null, error: reason instanceof Error ? reason.message : "Unknown error" }); });
-    return () => { cancelled = true; };
-  }, [location]);
-
-  useEffect(() => {
-    if (!location.docId || validateReaderRoute(location.docId, location.sectionId) !== null) return;
-    let cancelled = false;
-    const loadCoverage = () => void getTranslationCoverage(location.docId, TRANSLATION_LANGUAGE)
-      .then((coverage) => { if (!cancelled) setCoverageState({ status: "ready", coverage, error: null }); })
-      .catch((reason: unknown) => { if (!cancelled) setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" }); });
-    setCoverageState((previous) => ({ status: previous.coverage ? "ready" : "loading", coverage: previous.coverage, error: null }));
-    loadCoverage();
-    const timer = window.setInterval(loadCoverage, 1500);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [location.docId]);
-
   const currentId = section?.bookgraph.id ?? location.sectionId;
   const tree = useMemo(() => outline?.nodes ?? [], [outline]);
-  const currentIndex = tree.findIndex((node) => node.id === currentId);
-  const nextSectionId = section?.bookgraph.next_id ?? null;
   const currentTranslationVisible = mode === "bilingual" && canShowTranslation(translationState);
   const showTranslationAction = mode === "bilingual" && !currentTranslationVisible
     && (translationState.status === "ready" || translationState.status === "error");
   const go = (sectionId: string | null) => { if (sectionId) navigate(location.docId, sectionId, mode); };
   const changeMode = (nextMode: ReadingMode) => { setMode(nextMode); navigate(location.docId, location.sectionId, nextMode); };
-  const startCoverage = (percent: 5 | 10 | 25 | 100) => {
-    setTranslationAction("starting");
-    void startTranslationCoverage(location.docId, TRANSLATION_LANGUAGE, percent)
-      .then((coverage) => setCoverageState({ status: "ready", coverage, error: null }))
-      .catch((reason: unknown) => setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" }))
-      .finally(() => setTranslationAction("idle"));
-  };
-  const translateNext = () => {
-    if (!section?.bookgraph.next_id) return;
-    setTranslationAction("next");
-    void translateNextSection(location.docId, TRANSLATION_LANGUAGE, section.bookgraph.id)
-      .then((coverage) => {
-        setCoverageState({ status: "ready", coverage, error: null });
-        const waitForTranslation = () => void Promise.all([
-          getTranslationCoverage(location.docId, TRANSLATION_LANGUAGE),
-          getSectionTranslation(location.docId, section.bookgraph.next_id!, TRANSLATION_LANGUAGE),
-        ]).then(([nextCoverage, nextTranslation]) => {
-          setCoverageState({ status: "ready", coverage: nextCoverage, error: null });
-          if (nextTranslation.status === "fresh" && Boolean(nextTranslation.content)) {
-            setTranslationAction("idle");
-            go(section.bookgraph.next_id);
-          } else if (nextCoverage.status === "failed") {
-            setTranslationAction("idle");
-          } else {
-            window.setTimeout(waitForTranslation, 1200);
-          }
-        }).catch((reason: unknown) => {
-          setTranslationAction("idle");
-          setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" });
-        });
-        window.setTimeout(waitForTranslation, 1200);
-      })
-      .catch((reason: unknown) => {
-        setTranslationAction("idle");
-        setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" });
-      });
-  };
-  const requestCurrentTranslation = () => {
-    if (!section) return;
-    setTranslationAction("next");
-    void retrySectionTranslation(location.docId, TRANSLATION_LANGUAGE, section.bookgraph.id, Boolean(translationState.translation?.content))
-      .then((coverage) => {
-        setCoverageState({ status: "ready", coverage, error: null });
-        const waitForTranslation = () => void Promise.all([
-          getSectionTranslation(location.docId, section.bookgraph.id, TRANSLATION_LANGUAGE),
-          getTranslationCoverage(location.docId, TRANSLATION_LANGUAGE),
-        ]).then(([translation, coverage]) => {
-          setCoverageState({ status: "ready", coverage, error: null });
-          if (translation.status === "fresh" && Boolean(translation.content)) {
-            setTranslationState({ status: "ready", translation, error: null });
-            setTranslationAction("idle");
-          } else if (coverage.status === "failed") {
-            setTranslationState({ status: "error", translation: null, error: coverage.failures[section.bookgraph.id] ?? "Unable to retranslate this section. Please try again later." });
-            setTranslationAction("idle");
-          } else {
-            window.setTimeout(waitForTranslation, 1200);
-          }
-        }).catch((reason: unknown) => {
-          setTranslationAction("idle");
-          setTranslationState({ status: "error", translation: null, error: reason instanceof Error ? reason.message : "Unknown error" });
-        });
-        window.setTimeout(waitForTranslation, 1200);
-      })
-      .catch((reason: unknown) => {
-        setTranslationAction("idle");
-        setCoverageState({ status: "error", coverage: null, error: reason instanceof Error ? reason.message : "Unknown error" });
-      });
-  };
   const repairCurrentContent = (content: string, context: string, kind: "formula" | "markdown" | "region"): Promise<string> => {
     if (!section) return Promise.reject(new Error("Section is not available"));
     return repairSectionContent(location.docId, section.bookgraph.id, content, context, kind)
@@ -502,7 +413,8 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
   const [firstPage, secondPage] = useMemo(() => splitSequentialPages(readerSource), [readerSource]);
   return (
     <div className={`reader-shell reader-experience reader-font-${preferences.font} reader-size-${preferences.size} reader-mode-${mode} ${(mode !== "bilingual" && preferences.vertical) ? "reader-vertical" : ""}`} data-reader-theme={preferences.theme}>
-      <ReaderHeader title={bookTitle ?? location.docId ?? "Book Reader"} author={bookAuthor} onSearch={() => setSearchOpen(true)} onSettings={() => setSettingsOpen((value) => !value)} onPanel={() => setDrawerOpen(true)} onBookmark={() => setBookmarked((value) => !value)} bookmarked={bookmarked} onLibrary={onBackToLibrary} insightsOpen={insightsOpen} onInsights={() => { setInsightsOpen((value) => !value); setSettingsOpen(false); }} />
+      <ReaderHeader title={bookTitle ?? location.docId ?? "Book Reader"} author={bookAuthor} onSearch={() => setSearchOpen(true)} onSettings={() => setSettingsOpen((value) => !value)} onPanel={() => setDrawerOpen(true)} onBookmark={() => void bookmark.toggle()} bookmarked={bookmark.bookmarked} bookmarkDisabled={!section || bookmark.status !== "ready"} onLibrary={onBackToLibrary} insightsOpen={insightsOpen} onInsights={() => { setInsightsOpen((value) => !value); setSettingsOpen(false); }} />
+      {bookmark.message && <p key={bookmark.message} role="status" className="reader-bookmark-status" onAnimationEnd={bookmark.dismissMessage}>{bookmark.message}</p>}
       {settingsOpen && <div className="visual-settings-anchor"><VisualSettingsPopover theme={preferences.theme} font={preferences.font} size={preferences.size} vertical={preferences.vertical} showVertical={mode !== "bilingual"} onTheme={preferences.setTheme} onFont={preferences.setFont} onSize={preferences.setSize} onVertical={preferences.setVertical} /></div>}
       {searchOpen && <SearchModal source={readerSource} onClose={() => setSearchOpen(false)} onResult={(id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" })} />}
       <ReaderDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} mode={mode} onMode={changeMode}><aside className="toc" aria-label="Table of contents"><div className="toc-heading"><span>Contents</span></div>{tree.map((node) => <button key={node.id} className={`toc-item level-${Math.min(node.level, 4)} ${node.id === currentId ? "active" : ""}`} onClick={() => go(node.id)}>{node.title}</button>)}</aside></ReaderDrawer>
@@ -519,8 +431,8 @@ function ReaderApp({ onBackToLibrary }: { onBackToLibrary: () => void }) {
             <div className="bilingual"><section><div className="language-label">Original</div><h2 className="original-section-title">{repairedTitle ?? section.title}</h2><MarkdownArticle source={resolveBookGraphImageLinks(repairedOriginal ?? section.body, location.docId)} onRepairContent={repairCurrentContent} /></section><section><div className="language-label">Vietnamese</div><h2 className="translation-section-title">{translationState.translation?.translated_title ?? section.title}</h2><TranslationContent state={translationState} language={TRANSLATION_LANGUAGE} docId={location.docId} onRepairContent={repairCurrentContent} contentOverride={repairedTranslation} /></section></div>
           </> : preferences.vertical ? <MarkdownArticle source={readerSource} className="reader-prose reader-paged-prose original-vertical-columns" onRepairContent={repairCurrentContent} /> : <MarkdownArticle source={readerSource} className="reader-prose reader-paged-prose" onRepairContent={repairCurrentContent} />}
           <nav className="section-navigation reader-pagination" aria-label="Section navigation">
-            <button disabled={!section.bookgraph.prev_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.prev_id)}><ChevronLeft size={18} /> Previous Page</button>
-            <button disabled={!section.bookgraph.next_id || translationAction !== "idle"} onClick={() => go(section.bookgraph.next_id)}>Next Page <ChevronRight size={18} /></button>
+            <button disabled={!section.bookgraph.prev_id} onClick={() => go(section.bookgraph.prev_id)}><ChevronLeft size={18} /> Previous Page</button>
+            <button disabled={!section.bookgraph.next_id} onClick={() => go(section.bookgraph.next_id)}>Next Page <ChevronRight size={18} /></button>
           </nav>
           {mode !== "translation" && <section className="formula-repair-section" aria-label="Content rendering repair tools">
             <div><strong>Is the content rendering incorrectly?</strong><span>AI will review and repair the current section, including text, Markdown, and formulas.</span>{sectionRepairError && <small className="content-repair-error">{sectionRepairError}</small>}</div>

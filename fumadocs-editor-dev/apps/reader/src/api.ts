@@ -102,6 +102,23 @@ export function apiUrl(path: string): string {
   return `${apiBaseUrl()}${path}`;
 }
 
+export interface ReadingPosition { doc_id: string; section_id: string | null }
+
+export function getReadingPosition(docId: string): Promise<ReadingPosition> {
+  requireSafe(docId, "document id");
+  return request(`/api/documents/${encodeURIComponent(docId)}/reading-position`);
+}
+
+export function saveReadingPosition(docId: string, sectionId: string | null): Promise<ReadingPosition> {
+  requireSafe(docId, "document id");
+  if (sectionId !== null) requireSafe(sectionId, "section id");
+  return request(`/api/documents/${encodeURIComponent(docId)}/reading-position`, {
+    method: sectionId === null ? "DELETE" : "PUT",
+    headers: { "Content-Type": "application/json" },
+    ...(sectionId === null ? {} : { body: JSON.stringify({ section_id: sectionId }) }),
+  });
+}
+
 export function setRuntimeApiBaseUrl(baseUrl: string | null): void {
   const current = window as Window & { __BOOKGRAPH_API__?: RuntimeApiConfig };
   if (baseUrl) current.__BOOKGRAPH_API__ = { baseUrl };

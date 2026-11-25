@@ -1,6 +1,6 @@
 [package]
 name = "bookgraph-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local-first BookGraph reader"
 authors = ["BookGraph"]
 edition = "2021"

@@ -7,14 +7,14 @@ type ReaderTheme = "light" | "dark" | "paper";
 type ReaderFont = "serif" | "sans";
 type ReaderSize = "s" | "m" | "l" | "xl";
 
-type HeaderProps = { title: string; author: string; onSearch: () => void; onSettings: () => void; onPanel: () => void; onBookmark: () => void; bookmarked: boolean; onLibrary: () => void; insightsOpen: boolean; onInsights: () => void };
-export function ReaderHeader({ title, author, onSearch, onSettings, onPanel, onBookmark, bookmarked, onLibrary, insightsOpen, onInsights }: HeaderProps) {
+type HeaderProps = { title: string; author: string; onSearch: () => void; onSettings: () => void; onPanel: () => void; onBookmark: () => void; bookmarked: boolean; bookmarkDisabled?: boolean; onLibrary: () => void; insightsOpen: boolean; onInsights: () => void };
+export function ReaderHeader({ title, author, onSearch, onSettings, onPanel, onBookmark, bookmarked, bookmarkDisabled, onLibrary, insightsOpen, onInsights }: HeaderProps) {
   return <header className="book-reader-header">
     <button type="button" className="reader-library-link" onClick={onLibrary}><img src="/bookgraph-icon.svg" width={24} height={24} alt="" aria-hidden="true" /> Library</button>
     <div className="reader-book-context"><span>{title}</span>{author && <small>{author}</small>}</div>
     <div className="reader-header-actions">
       <button type="button" aria-label="Search in this book" onClick={onSearch}><Search size={18} /></button>
-      <button type="button" aria-label={bookmarked ? "Remove bookmark" : "Bookmark this page"} aria-pressed={bookmarked} onClick={onBookmark}><Bookmark size={18} fill={bookmarked ? "currentColor" : "none"} /></button>
+      <button type="button" aria-label={bookmarked ? "Remove saved reading position" : "Save reading position"} title={bookmarked ? "Remove saved reading position" : "Save reading position"} aria-pressed={bookmarked} disabled={bookmarkDisabled} onClick={onBookmark}><Bookmark size={18} fill={bookmarked ? "currentColor" : "none"} /></button>
       <button type="button" aria-label="Open reading panels" onClick={onPanel}><List size={18} /></button>
       <button type="button" aria-label="Open visual settings" onClick={onSettings}><Settings2 size={18} /></button>
       <button type="button" aria-label="Toggle progress and memory" title="Progress & memory" aria-expanded={insightsOpen} aria-controls="reader-insights" onClick={onInsights}><PanelRight size={18} /></button>

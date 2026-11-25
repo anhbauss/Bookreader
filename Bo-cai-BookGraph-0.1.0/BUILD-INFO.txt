@@ -1,10 +1,14 @@
-BookGraph desktop 0.1.0
-Source commit: 5e013d1b16c43e660745deb2497a5877a74320d2
-CI: https://github.com/anhbauss/Bookreader/actions/runs/44900426513
-Linux build host: Ubuntu 24.04 x86_64
-Windows build host: GitHub Actions windows-latest x64
-Windows installer: NSIS, current-user, unsigned
-Linux: Debian package and AppImage, libc >= 2.39
-Runtime: bundled Python 3.12 service; no developer environment required.
-Verification: frozen service with empty PATH; PDF rendering and crop;
-PDF workspace preparation; local HTTP; installed-service smoke checks on both OSes.
+BookGraph desktop 0.1.0 - local Linux rebuild 2026-11-24
+Linux source base commit: cc8e11535c43bb19405e543a4610e8a51d787878 plus current workspace changes.
+Fix: verify preserved inline MinerU HTML tables as translation assets.
+Linux build host: Ubuntu 26.04.1 LTS x86_64
+Linux packages: AppImage and Debian package rebuilt locally.
+Verification: targeted translation tests, frontend tests/typecheck, frozen service and extracted Debian service smoke checks.
+Known existing backend test failures: MDX raw LaTeX display and parsed-code fence assertion.
+Windows installer: unchanged previous build from https://github.com/anhbauss/Bookreader/actions/runs/44900426513
+Runtime: bundled Python 3.12 service.
+Build cache disabled; verified all 113 Python source files match the build environment.
+Actual affected section verified via packaged backend HTTP: fresh, assets complete, no structure issues.
+
+Frontend update 2026-11-24: section-scoped translation polling; ignore late responses after navigation; Next/Previous remain available during translation.
+Verification: 117 frontend tests passed, including pagination/contents/keyboard navigation and deferred-response races; TypeScript passed.

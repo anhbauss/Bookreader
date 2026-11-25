@@ -22,6 +22,7 @@ from bookgraph.mcp.errors import (
     SectionNotFoundError,
     SectionsNotFoundError,
 )
+from bookgraph.reading_position import reading_position
 from bookgraph.repair_jobs import get_repair_job, start_repair_job
 from bookgraph.utils import validate_slug_id
 from bookgraph.workspace import WorkspacePaths
@@ -120,6 +121,21 @@ def create_app(
         return response(
             lambda: service.get_document_progress(workspace, request.path_params["doc_id"])
         )
+
+    async def document_reading_position(request: Request) -> Any:
+        section_id = None
+        if request.method == "PUT":
+            try:
+                payload = await request.json()
+            except ValueError:
+                return _error(JSONResponse, 400, "service_error", "Expected a JSON object.")
+            if not isinstance(payload, dict) or not isinstance(payload.get("section_id"), str):
+                return _error(JSONResponse, 400, "service_error", "section_id must be a string.")
+            section_id = payload["section_id"]
+        return response(lambda: reading_position(
+            workspace, request.path_params["doc_id"], section_id=section_id,
+            update=request.method != "GET",
+        ))
 
     async def complete_document(request: Request) -> Any:
         return response(
@@ -325,6 +341,8 @@ def create_app(
     routes = [
         Route("/api/documents", documents, methods=["GET"]),
         Route("/api/documents/{doc_id:str}/progress", document_progress, methods=["GET"]),
+        Route("/api/documents/{doc_id:str}/reading-position", document_reading_position,
+              methods=["GET", "PUT", "DELETE"]),
         Route("/api/documents/{doc_id:str}/complete", complete_document, methods=["POST"]),
         Route(
             "/api/documents/{doc_id:str}/sections/{section_id:str}", section, methods=["GET"]
@@ -408,7 +426,7 @@ def create_app(
             middleware=[Middleware(BaseHTTPMiddleware, dispatch=authorize)],
         ),
         allow_origins=list(origins),
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
 

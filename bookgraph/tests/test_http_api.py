@@ -61,6 +61,38 @@ def test_sections_and_outline_are_exposed_as_browser_safe_json(tmp_path: Path) -
     assert [node["id"] for node in outline.json()["nodes"]] == ["signals.intro", "signals.sampling"]
 
 
+def test_reading_position_survives_restart_and_can_be_moved_or_removed(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    url = "/api/documents/signals/reading-position"
+    with TestClient(create_app(workspace)) as client:
+        assert client.get(url).json() == {"doc_id": "signals", "section_id": None}
+        saved = client.put(url, json={"section_id": "signals.sampling"})
+        assert saved.status_code == 200
+        assert saved.json()["section_id"] == "signals.sampling"
+    with TestClient(create_app(workspace)) as client:
+        assert client.get(url).json()["section_id"] == "signals.sampling"
+        assert client.put(url, json={"section_id": "signals.intro"}).status_code == 200
+        assert client.get(url).json()["section_id"] == "signals.intro"
+        assert client.delete(url).json()["section_id"] is None
+        assert client.delete(url).status_code == 200
+        assert client.get(url).json()["section_id"] is None
+
+
+@pytest.mark.parametrize("payload", [{}, [], {"section_id": 12}, {"section_id": "../secret"}])
+def test_reading_position_rejects_invalid_input(tmp_path: Path, payload: object) -> None:
+    with TestClient(create_app(_workspace(tmp_path))) as client:
+        result = client.put("/api/documents/signals/reading-position", json=payload)
+        assert result.status_code in (400, 422)
+
+
+def test_reading_position_rejects_unknown_section_without_overwriting(tmp_path: Path) -> None:
+    with TestClient(create_app(_workspace(tmp_path))) as client:
+        url = "/api/documents/signals/reading-position"
+        client.put(url, json={"section_id": "signals.intro"})
+        assert client.put(url, json={"section_id": "other.intro"}).status_code == 404
+        assert client.get(url).json()["section_id"] == "signals.intro"
+
+
 def test_old_section_urls_resolve_to_their_group_after_resegmentation(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     section = Section(id="signals.sampling", doc_id="signals", title="1.1 Sampling", level=2,

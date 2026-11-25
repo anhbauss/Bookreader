@@ -17,3 +17,10 @@
    Keep section headings in the reading flow and formulas in a single column. */
 .reader-experience.reader-vertical :is(.original-vertical-columns, .translation-vertical-columns) > :is(h1, h2, h3, h4) { column-span: none; }
 .reader-experience.reader-vertical :is(.original-vertical-columns, .translation-vertical-columns) > :is(.math-display, .table-scroll, .code-block, figure) { break-inside: avoid; -webkit-column-break-inside: avoid; }
+
+.reader-bookmark-status { position: fixed; z-index: 45; top: 72px; right: 24px; max-width: min(360px, calc(100vw - 48px)); margin: 0; padding: 10px 14px; border: 1px solid var(--reader-border); border-radius: 8px; color: var(--reader-text); background: var(--reader-bg); font-family: var(--reader-sans); font-size: 13px; }
+.reader-header-actions button:disabled { opacity: .5; cursor: wait; }
+.reader-header-actions button[aria-pressed="true"] { color: var(--reader-accent); }
+.reader-bookmark-status { animation: reader-bookmark-fade-out 400ms ease-out 2s forwards; }
+@keyframes reader-bookmark-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .reader-bookmark-status { animation-duration: 1ms; } }
