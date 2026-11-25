@@ -21,6 +21,17 @@ The `Build BookGraph installers` GitHub Actions workflow runs these steps on Ubu
 and Windows. It creates downloadable build artifacts and does not publish a public release.
 Run it manually from Actions after the workflow and source have been pushed to GitHub.
 
+## Publish a new version
+
+1. Update the desktop version in `tauri.conf.json`, `Cargo.toml` and `Cargo.lock`.
+2. Push the source and version tag, then run `Build BookGraph installers` for that tag.
+3. Prepare a draft GitHub release for the tag with changes, checks and known limitations.
+4. Run `Publish BookGraph desktop release` with the tag and successful installer build run ID.
+
+The publish workflow checks that the build succeeded for the tagged commit, copies the
+Windows and Linux installers directly on GitHub, adds installation instructions, build
+provenance and SHA-256 checksums, then publishes the draft as the latest release.
+
 ## Reader installation
 
 - Windows: open the `*-setup.exe`, follow the installer, open BookGraph from Start.

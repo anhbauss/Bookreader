@@ -1,0 +1,100 @@
+name: Publish BookGraph desktop release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (for example v0.1.1)
+        required: true
+        type: string
+      build_run_id:
+        description: Successful Build BookGraph installers run for that tag
+        required: true
+        type: string
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: publish-desktop-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Validate source and successful installer build
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          tag = os.environ['RELEASE_TAG']
+          run_id = os.environ['BUILD_RUN_ID']
+          if not re.fullmatch(r'v\d+\.\d+\.\d+', tag) or not run_id.isdecimal():
+              raise SystemExit('Expected a semantic version tag and numeric build run ID.')
+          repository = os.environ['GITHUB_REPOSITORY']
+          run = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/actions/runs/{run_id}']))
+          commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if (run['conclusion'] != 'success' or run['head_sha'] != commit
+                  or run['path'] != '.github/workflows/desktop-installers.yml'):
+              raise SystemExit('Installer build must have succeeded for the release source commit.')
+          release = json.loads(subprocess.check_output(['gh', 'release', 'view', tag, '--json', 'isDraft']))
+          if not release['isDraft']:
+              raise SystemExit('Prepare a draft release with release notes before publishing.')
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run_id }}
+          pattern: BookGraph-*-installers
+          path: release-artifacts
+      - name: Prepare installers and release metadata
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, shutil, subprocess
+          from pathlib import Path
+          tag = os.environ['RELEASE_TAG']
+          version = tag.removeprefix('v')
+          out = Path('release-assets')
+          out.mkdir()
+          expected = {f'BookGraph_{version}_amd64.deb', f'BookGraph_{version}_amd64.AppImage',
+                      f'BookGraph_{version}_x64-setup.exe'}
+          artifacts = [p for p in Path('release-artifacts').rglob('*') if p.is_file()]
+          if len(artifacts) != len(expected) or {p.name for p in artifacts} != expected:
+              raise SystemExit('Expected exactly the Linux and Windows installers for this version.')
+          for artifact in artifacts:
+              shutil.copy2(artifact, out / artifact.name)
+          guide = Path('Bo-cai-BookGraph-0.1.0/HUONG-DAN.txt').read_text()
+          guide = guide.split('KIỂM TRA BẢN BUILD')[0].replace('0.1.0', version)
+          (out / 'HUONG-DAN.txt').write_text(guide)
+          shutil.copy2('Bo-cai-BookGraph-0.1.0/THIRD-PARTY-NOTICES.txt', out)
+          commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          run_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['BUILD_RUN_ID']}"
+          (out / 'BUILD-INFO.txt').write_text(
+              f'BookGraph desktop {version}\nSource tag: {tag}\nSource commit: {commit}\n'
+              f'Installer build: {run_url}\nLinux build host: GitHub Actions Ubuntu 24.04 x86_64\n'
+              'Windows build host: GitHub Actions windows-latest x64\n'
+              'Runtime: bundled Python 3.12 service. No user books, settings or API credentials.\n'
+              'CI checks passed: frozen service on both OSes, installed Windows service, extracted Debian service.\n'
+              'See release notes for source test results and known limitations.\n'
+              'Full installed UI flows have not been manually tested on every OS for this release.\n')
+          checksums = []
+          for path in sorted(out.iterdir()):
+              with path.open('rb') as stream:
+                  digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+              checksums.append(f'{digest}  {path.name}\n')
+          (out / 'SHA256SUMS.txt').write_text(''.join(checksums))
+          PY
+          cd release-assets
+          sha256sum --check SHA256SUMS.txt
+          dpkg-deb --field "BookGraph_${RELEASE_TAG#v}_amd64.deb" Version
+      - name: Upload assets and publish release
+        shell: bash
+        run: |
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest
