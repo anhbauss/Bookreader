@@ -12,6 +12,8 @@ const settings: AppSettings = {
 };
 const api = {
   selectLibraryRoot: vi.fn(), saveAppSettings: vi.fn(), getCredentialStatus: vi.fn(),
+  saveTranslationApiKey: vi.fn(),
+  listProviderModels: vi.fn(),
 };
 const completed = vi.fn();
 let root: Root;
@@ -23,6 +25,8 @@ beforeEach(() => {
   api.selectLibraryRoot.mockResolvedValue("/new-library");
   api.saveAppSettings.mockImplementation(async (value: AppSettings) => value);
   api.getCredentialStatus.mockResolvedValue({ configured: true, maskedSuffix: null });
+  api.saveTranslationApiKey.mockResolvedValue({ configured: true, maskedSuffix: null });
+  api.listProviderModels.mockResolvedValue([{ id: "available-model", name: "Available model" }]);
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -41,6 +45,26 @@ function button(label: string) {
 }
 
 describe("library setup Continue", () => {
+  it.each(["openai", "gemini"] as const)("lets %s users choose a discovered model without entering a Base URL", async (provider) => {
+    const official = { ...settings, provider };
+    await act(async () => root.render(<Onboarding initialSettings={official}
+      initialCredential={{ configured: false, maskedSuffix: null }} onComplete={completed} />));
+    expect([...container.querySelectorAll("label")].some((node) => node.firstChild?.textContent === "Base URL")).toBe(false);
+    const key = container.querySelector<HTMLInputElement>('input[type="password"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(key, "test-official-key");
+      key.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button("Load models").click());
+    expect(api.listProviderModels).toHaveBeenCalledWith(provider, "", "test-official-key");
+    const model = [...container.querySelectorAll("label")].find((node) => node.firstChild?.textContent === "Model")!.querySelector("select")!;
+    await act(async () => { model.value = "available-model"; model.dispatchEvent(new Event("change", { bubbles: true })); });
+    await act(async () => button("Sign in").click());
+    expect(api.saveAppSettings).toHaveBeenCalledWith({ ...official, model: "available-model" });
+    expect(JSON.stringify(api.saveAppSettings.mock.calls)).not.toContain("test-official-key");
+    expect(container.textContent).toContain("Add a profile picture.");
+  });
+
   it("continues with the remembered folder and verifies the stored credential", async () => {
     await render();
     expect(container.textContent).toContain("/existing-library");

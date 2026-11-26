@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -25,6 +26,8 @@ from bookgraph.utils import validate_slug_id
 from bookgraph.workspace import WorkspacePaths
 
 DEFAULT_CHUNK_CHARS = 5000
+_MAX_PART_ATTEMPTS = 3
+_LOGGER = logging.getLogger(__name__)
 _VERSION = 1
 _PARSER = (
     MarkdownIt("commonmark", {"html": True})
@@ -48,6 +51,10 @@ class SectionTranslator(Protocol):
     def translate_section(self, source: str, *, target_language: str) -> str: ...
 
     def translate_title(self, title: str, *, target_language: str) -> str: ...
+
+
+class _PartValidationError(ReadingServiceError):
+    """A generated part failed validation and can be requested again safely."""
 
 
 def _offsets(source: str) -> list[int]:
@@ -128,23 +135,31 @@ def _translate_part(source: str, lang: str, provider: SectionTranslator) -> str:
     request = f"{masked.strip()}\n\n{terminal}"
     translated = provider.translate_section(request, target_language=lang).strip()
     if not translated:
-        raise ReadingServiceError("Translation provider returned an empty part.")
+        raise _PartValidationError("Translation provider returned an empty part.")
+    # Missing markers have position -1; checking order first mislabels their loss
+    # as reordering whenever a later marker disappears.
+    for marker in replacements:
+        count = translated.count(marker)
+        if count == 0:
+            raise _PartValidationError(
+                "Translation lost or changed protected source content "
+                "(formula, code block or link)."
+            )
+        if count > 1:
+            raise _PartValidationError(
+                "Translation duplicated protected source content (formula, code block or link)."
+            )
     positions = [translated.find(marker) for marker in replacements]
     if positions != sorted(positions):
-        raise ReadingServiceError("Translation reordered protected source content.")
-    for marker in replacements:
-        if translated.count(marker) != 1:
-            raise ReadingServiceError(
-                "Translation changed a protected formula, code block or link."
-            )
+        raise _PartValidationError("Translation reordered protected source content.")
     if translated.count(terminal) != 1 or not translated.endswith(terminal):
-        raise ReadingServiceError("Translation is incomplete: the end-of-part marker is missing.")
+        raise _PartValidationError("Translation is incomplete: the end-of-part marker is missing.")
     translated = translated[: -len(terminal)].rstrip()
     for marker, original in replacements.items():
         translated = translated.replace(marker, original)
     issues = check_translation_structure(source, translated)
     if issues:
-        raise ReadingServiceError(
+        raise _PartValidationError(
             "Translation changed structure: " + describe_structure_issues(issues)
         )
     # Preserve the original boundary: split prose remains a single paragraph;
@@ -152,6 +167,23 @@ def _translate_part(source: str, lang: str, provider: SectionTranslator) -> str:
     leading = masked[: len(masked) - len(masked.lstrip())]
     trailing = masked[len(masked.rstrip()) :]
     return leading + translated + trailing
+
+
+def _translate_part_with_retries(source: str, lang: str, provider: SectionTranslator) -> str:
+    """Retry only invalid generated output, never provider/credential/network failures."""
+    for attempt in range(1, _MAX_PART_ATTEMPTS + 1):
+        try:
+            return _translate_part(source, lang, provider)
+        except _PartValidationError as exc:
+            if attempt == _MAX_PART_ATTEMPTS:
+                raise _PartValidationError(
+                    f"{exc} Automatic retries exhausted ({attempt} attempts)."
+                ) from exc
+            _LOGGER.warning(
+                "Retrying invalid translation part after attempt %d/%d: %s",
+                attempt, _MAX_PART_ATTEMPTS, exc,
+            )
+    raise AssertionError("Part attempts must be positive")  # pragma: no cover
 
 
 def _digest(value: str) -> str:
@@ -243,7 +275,7 @@ def translate_in_chunks(
         translated = _read_checkpoint(path, source)
         if translated is None:
             try:
-                translated = _translate_part(source, lang, provider)
+                translated = _translate_part_with_retries(source, lang, provider)
             except ReadingServiceError as exc:
                 raise ReadingServiceError(
                     f"Translation part {index}/{len(chunks)} failed: {exc} "

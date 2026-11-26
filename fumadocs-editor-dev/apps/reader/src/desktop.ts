@@ -1,7 +1,7 @@
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { setRuntimeApiBaseUrl } from "./api";
 
-export type TranslationProvider = "openai-compatible" | "anthropic-compatible";
+export type TranslationProvider = "openai" | "anthropic" | "openai-compatible" | "anthropic-compatible" | "gemini";
 
 export type AppSettings = {
   version: 1;
@@ -14,6 +14,8 @@ export type AppSettings = {
   profileImagePath: string | null;
   libraryRoot: string | null;
 };
+
+export type ProviderModel = { id: string; name: string };
 
 export type CredentialStatus = {
   configured: boolean;
@@ -63,6 +65,7 @@ export type DesktopApi = {
   getAppSettings(): Promise<AppSettings>;
   saveAppSettings(settings: AppSettings): Promise<AppSettings>;
   getCredentialStatus(): Promise<CredentialStatus>;
+  listProviderModels(provider: TranslationProvider, baseUrl: string, apiKey: string): Promise<ProviderModel[]>;
   saveTranslationApiKey(apiKey: string): Promise<CredentialStatus>;
   deleteTranslationApiKey(): Promise<CredentialStatus>;
   selectProfileImage(): Promise<string | null>;
@@ -92,7 +95,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   version: 1,
   onboardingCompleted: false,
   displayName: "",
-  provider: "openai-compatible",
+  provider: "openai",
   providerBaseUrl: "",
   model: "",
   targetLanguage: "vi",
@@ -122,8 +125,8 @@ function readBrowserSettings(): AppSettings {
       libraryRoot: typeof candidate.libraryRoot === "string" ? candidate.libraryRoot : null,
       onboardingCompleted: candidate.onboardingCompleted === true,
       displayName: typeof candidate.displayName === "string" ? candidate.displayName : "",
-      provider: candidate.provider === "anthropic-compatible" ? "anthropic-compatible" : "openai-compatible",
-      providerBaseUrl: typeof candidate.providerBaseUrl === "string" ? candidate.providerBaseUrl : "",
+      provider: String(candidate.provider) === "antigravity" ? "openai-compatible" : candidate.provider === "gemini" || candidate.provider === "anthropic" || candidate.provider === "openai" || candidate.provider === "anthropic-compatible" || candidate.provider === "openai-compatible" ? candidate.provider : "openai",
+      providerBaseUrl: typeof candidate.providerBaseUrl === "string" ? candidate.providerBaseUrl : String(candidate.provider) === "antigravity" ? "http://127.0.0.1:8045/v1" : "",
       model: typeof candidate.model === "string" ? candidate.model : "",
       profileImagePath: typeof candidate.profileImagePath === "string" ? candidate.profileImagePath : null,
     };
@@ -145,6 +148,7 @@ function browserApi(): DesktopApi {
   return {
     async getAppSettings() { return readBrowserSettings(); },
     async saveAppSettings(settings) { return writeBrowserSettings(settings); },
+    async listProviderModels() { throw new Error("Load models in the desktop application, or enter the model ID manually."); },
     async getCredentialStatus() {
       return { configured: browserStorage()?.getItem(browserKeyStatusKey) === "true", maskedSuffix: null };
     },
@@ -192,6 +196,7 @@ function tauriApi(invoke: TauriInvoke): DesktopApi {
     },
     saveAppSettings: (settings) => invoke<AppSettings>("save_app_settings", { settings }),
     getCredentialStatus: () => invoke<CredentialStatus>("get_credential_status"),
+    listProviderModels: (provider, baseUrl, apiKey) => invoke<ProviderModel[]>("list_provider_models", { provider, baseUrl, apiKey }),
     saveTranslationApiKey: (apiKey) => invoke<CredentialStatus>("save_translation_api_key", { apiKey }),
     deleteTranslationApiKey: () => invoke<CredentialStatus>("delete_translation_api_key"),
     selectProfileImage: () => invoke<string | null>("select_profile_image"),

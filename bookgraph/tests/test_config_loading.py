@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from bookgraph.cli import app
@@ -147,3 +148,18 @@ def test_reading_plan_cli_flag_overrides_configured_daily_sections(tmp_path: Pat
     assert "daily_sections: 1" in result.output
     plan = json.loads((tmp_path / "reading_plans" / "deep-work.json").read_text())
     assert plan["daily_sections"] == 1
+def test_selected_antigravity_connection_overrides_previous_workspace_provider(
+    tmp_path, monkeypatch,
+):
+    workspace = WorkspacePaths(tmp_path)
+    workspace.config.write_text(
+        '[translation]\nprovider = "anthropic-compatible"\n'
+        'base_url = "https://old.example"\nmodel = "old-model"\n'
+    )
+    monkeypatch.setenv("BOOKGRAPH_TRANSLATION_PROVIDER", "antigravity")
+    monkeypatch.setenv("BOOKGRAPH_TRANSLATION_BASE_URL", "http://127.0.0.1:8045/v1")
+    monkeypatch.setenv("BOOKGRAPH_TRANSLATION_MODEL", "proxy-model")
+    translation = load_config(workspace).translation
+    assert translation.provider == "antigravity"
+    assert translation.base_url == "http://127.0.0.1:8045/v1"
+    assert translation.model == "proxy-model"

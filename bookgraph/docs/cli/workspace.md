@@ -91,6 +91,19 @@ Code and equations are restored locally from protected markers, as are image/lin
 references. Missing or reordered markers, changed structural targets and responses
 flagged as truncated by the provider are rejected before checkpointing.
 
+Parts rejected by local output validation (missing, duplicated or reordered protected
+markers, missing end marker or changed structure) are requested again automatically,
+up to three total attempts per part. Only the failing part is retried. Credential
+and connection failures stop immediately. Temporary API server responses
+(`408`, `500`, `502`, `503`, `504`) have a separate three-attempt HTTP retry budget,
+with one- and two-second backoff. A server's `Retry-After` is respected; requests to
+wait more than eight seconds stop instead of retrying too early. Key/permission,
+model-unavailable and quota/credit errors (`401`, `403`, `404`, `429`) are not
+automatically retried. Client-facing failures include the HTTP status and a safe
+explanation without exposing raw provider responses, credentials or book text.
+If validation still fails after three attempts, the reader shows the reason and the
+attempt count, while keeping earlier validated checkpoints for a manual retry.
+
 Completed parts are saved under `runs/translation-chunks/`. A normal retry resumes
 matching parts; changing the source, language or provider/model invalidates their
 reuse. Explicitly retranslating an existing section (`force=True`) clears its part

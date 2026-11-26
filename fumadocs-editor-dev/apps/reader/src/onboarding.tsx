@@ -1,15 +1,11 @@
 import { BookGraphBrand } from "./bookgraph-brand";
 import { BookOpen, Camera, FolderOpen, KeyRound, LoaderCircle, Plus, UserRound, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { desktopApi, localFileUrl, type AppSettings, type CredentialStatus, type TranslationProvider } from "./desktop";
+import { desktopApi, localFileUrl, type AppSettings, type CredentialStatus } from "./desktop";
+import { AiProviderFields, sameAiConnection, validateAiSettings } from "./ai-provider-fields";
 import "./onboarding.css";
 
 type Step = "profile" | "avatar" | "library";
-
-const PROVIDERS: Array<{ value: TranslationProvider; label: string; hint: string }> = [
-  { value: "openai-compatible", label: "OpenAI compatible", hint: "OpenAI-compatible API endpoint" },
-  { value: "anthropic-compatible", label: "Anthropic compatible", hint: "Anthropic Messages API" },
-];
 
 export function Onboarding({ initialSettings, initialCredential, onComplete }: {
   initialSettings: AppSettings;
@@ -32,6 +28,11 @@ export function Onboarding({ initialSettings, initialCredential, onComplete }: {
     const displayName = nameInput.current?.value.trim() ?? "";
     if (!displayName) { setError("Please enter a display name."); return; }
     if (!credential.configured && !apiKey.trim()) { setError("Please enter an API key."); return; }
+    if (!sameAiConnection(settings, initialSettings) && !apiKey.trim()) {
+      setError("Enter the API key for your selected provider."); return;
+    }
+    const configurationError = validateAiSettings(settings);
+    if (configurationError) { setError(configurationError); return; }
     setBusy(true); setError(null);
     try {
       if (apiKey.trim()) {
@@ -44,7 +45,7 @@ export function Onboarding({ initialSettings, initialCredential, onComplete }: {
       setApiKey("");
       setStep("avatar");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to save your profile.");
+      setError(reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "Unable to save your profile.");
     } finally { setBusy(false); }
   };
 
@@ -114,9 +115,9 @@ export function Onboarding({ initialSettings, initialCredential, onComplete }: {
         <p className="onboarding-kicker">SIGN IN</p>
         <h1 id="onboarding-title">Welcome to BookGraph.</h1>
         <p className="onboarding-copy">Enter your name and translation API key to get started. Your key is stored in your operating system’s secure credential store, never in your book library.</p>
-        <label>Translation provider<select value={settings.provider} onChange={(event) => setSettings({ ...settings, provider: event.target.value as TranslationProvider })}>{PROVIDERS.map((provider) => <option value={provider.value} key={provider.value}>{provider.label}</option>)}</select></label>
-        <p className="field-hint">{PROVIDERS.find((provider) => provider.value === settings.provider)?.hint}</p>
+        <AiProviderFields settings={settings} onChange={(next) => { if (next.provider !== settings.provider) setApiKey(""); setSettings(next); }} apiKey={apiKey} canUseSavedKey={credential.configured && sameAiConnection(settings, initialSettings)} disabled={busy}>
         <label>API key<input value={apiKey} type="password" autoComplete="off" onChange={(event) => setApiKey(event.target.value)} placeholder={credential.configured ? `Configured${credential.maskedSuffix ? ` ••••${credential.maskedSuffix}` : ""} — enter a new key to replace it` : "Paste your API key"} /></label>
+        </AiProviderFields>
         <label className="display-name-field">Display name<input ref={nameInput} defaultValue={settings.displayName} autoComplete="name" placeholder="Enter your name" /></label>
         {error && <p className="onboarding-error" role="alert">{error}</p>}
         <button className="onboarding-primary" type="button" disabled={busy} onClick={() => void saveProfile()}>{busy && <LoaderCircle className="spin" size={16} />}{busy ? "Signing in…" : "Sign in"}</button>

@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use keyring::Entry;
+use std::io::Write;
+use std::process::Stdio;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, net::{TcpListener, TcpStream}, path::{Path, PathBuf}, process::{Child, Command}, sync::Mutex, thread, time::Duration};
 use tauri::{AppHandle, Manager, State};
@@ -9,7 +11,6 @@ use tauri_plugin_dialog::DialogExt;
 const APP_SETTINGS_FILE: &str = "settings.json";
 const KEYRING_SERVICE: &str = "com.bookgraph.reader";
 const KEYRING_ACCOUNT: &str = "translation-api-key";
-const DEFAULT_TRANSLATION_PROVIDER: &str = "anthropic-compatible";
 const DEFAULT_TRANSLATION_BASE_URL: &str = "https://api.mwapi.dev";
 const DEFAULT_TRANSLATION_MODEL: &str = "claude-haiku-5-5";
 
@@ -34,7 +35,7 @@ impl Default for AppSettings {
             version: 1,
             onboarding_completed: false,
             display_name: String::new(),
-            provider: "openai-compatible".to_owned(),
+            provider: "openai".to_owned(),
             provider_base_url: String::new(),
             model: String::new(),
             target_language: "vi".to_owned(),
@@ -143,7 +144,7 @@ fn read_settings(app: &AppHandle) -> Result<AppSettings, String> {
     let path = settings_path(app)?;
     if !path.exists() { return Ok(AppSettings::default()); }
     let raw = fs::read_to_string(&path).map_err(|error| format!("Unable to read settings: {error}"))?;
-    serde_json::from_str(&raw).map_err(|_| "BookGraph settings are invalid. Remove settings.json and try again.".to_owned())
+    serde_json::from_str(&raw).map(preserve_legacy_connection).map_err(|_| "BookGraph settings are invalid. Remove settings.json and try again.".to_owned())
 }
 
 fn write_settings(app: &AppHandle, settings: &AppSettings) -> Result<(), String> {
@@ -252,11 +253,99 @@ fn reading_progress_percent(folder: &Path, doc_id: &str) -> Option<u8> {
 #[tauri::command]
 fn get_app_settings(app: AppHandle) -> Result<AppSettings, String> { read_settings(&app) }
 
+fn preserve_legacy_connection(mut settings: AppSettings) -> AppSettings {
+    if settings.provider == "antigravity" {
+        settings.provider = "openai-compatible".to_owned();
+        let base = settings.provider_base_url.trim().trim_end_matches('/').trim_end_matches("/chat/completions");
+        settings.provider_base_url = if base.is_empty() { "http://127.0.0.1:8045/v1".to_owned() }
+            else if base.ends_with("/v1") { base.to_owned() } else { format!("{base}/v1") };
+        return settings;
+    }
+    // Existing keys keep their original gateway; never migrate them to an official host.
+    if matches!(settings.provider.as_str(), "openai-compatible" | "anthropic-compatible") {
+        if settings.provider_base_url.trim().is_empty() { settings.provider_base_url = DEFAULT_TRANSLATION_BASE_URL.to_owned(); }
+        if settings.model.trim().is_empty() { settings.model = DEFAULT_TRANSLATION_MODEL.to_owned(); }
+    }
+    settings
+}
+
+fn provider_base<'a>(provider: &str, base: &'a str) -> Result<&'a str, String> {
+    if provider == "openai" { return Ok("https://api.openai.com/v1"); }
+    if provider == "anthropic" { return Ok("https://api.anthropic.com"); }
+    if provider == "gemini" { return Ok("https://generativelanguage.googleapis.com/v1beta/openai"); }
+    if !matches!(provider, "openai-compatible" | "anthropic-compatible") {
+        return Err("Choose OpenAI, Anthropic, Google Gemini or another API gateway.".to_owned());
+    }
+    let base = base.trim().trim_end_matches('/');
+    if base.is_empty() { return Err("Enter your gateway Base URL.".to_owned()); }
+    let url = tauri::Url::parse(base).map_err(|_| "Enter a valid HTTP(S) Base URL.".to_owned())?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none()
+        || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
+        return Err("Enter an HTTP(S) Base URL without credentials or query parameters.".to_owned());
+    }
+    Ok(base)
+}
+
+fn translation_connection(settings: &AppSettings) -> Result<(&str, &str, &str), String> {
+    let provider = settings.provider.trim();
+    let base = provider_base(provider, &settings.provider_base_url)?;
+    let model = settings.model.trim();
+    if model.is_empty() { return Err("Load models and choose one, or enter its API model ID.".to_owned()); }
+    Ok((provider, base, model))
+}
+
+fn can_reuse_model_key(settings: &AppSettings, provider: &str, base: &str) -> bool {
+    if settings.provider != provider { return false; }
+    match (provider_base(&settings.provider, &settings.provider_base_url), provider_base(provider, base)) {
+        (Ok(saved), Ok(requested)) => saved == requested,
+        _ => false,
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct ProviderModel { id: String, name: String }
+
+#[tauri::command]
+async fn list_provider_models(provider: String, base_url: String, api_key: String, app: AppHandle) -> Result<Vec<ProviderModel>, String> {
+    provider_base(&provider, &base_url)?;
+    let key = if api_key.trim().is_empty() {
+        let settings = read_settings(&app)?;
+        if !can_reuse_model_key(&settings, &provider, &base_url) {
+            return Err("Enter the API key for your selected provider and address.".to_owned());
+        }
+        credential_entry()?.get_password().map_err(|_| "Enter your API key before loading models.".to_owned())?
+    } else { api_key.trim().to_owned() };
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(not(debug_assertions))]
+        let mut command = { let mut command = bookgraph_command(); command.arg("--desktop-list-models"); command };
+        #[cfg(debug_assertions)]
+        let mut command = {
+            let mut command = Command::new("uv");
+            command.arg("--directory").arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../bookgraph"))
+                .args(["run", "--extra", "http", "python", "-m", "bookgraph.model_catalog"]);
+            command
+        };
+        let payload = serde_json::to_vec(&serde_json::json!({"provider": provider, "base_url": base_url, "api_key": key}))
+            .map_err(|_| "Unable to prepare model-list request.".to_owned())?;
+        let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+            .spawn().map_err(|_| "Unable to start model discovery.".to_owned())?;
+        child.stdin.take().ok_or_else(|| "Unable to send model-list request.".to_owned())?
+            .write_all(&payload).map_err(|_| "Unable to send model-list request.".to_owned())?;
+        let output = child.wait_with_output().map_err(|_| "Unable to read model list.".to_owned())?;
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|_| "Model discovery returned an invalid result.".to_owned())?;
+        if !output.status.success() {
+            return Err(value.get("error").and_then(|value| value.as_str()).unwrap_or("Unable to load models.").to_owned());
+        }
+        serde_json::from_value(value.get("models").cloned().unwrap_or(serde_json::Value::Null))
+            .map_err(|_| "Model discovery returned an invalid model list.".to_owned())
+    }).await.map_err(|_| "Model discovery could not finish.".to_owned())?
+}
+
 #[tauri::command]
 fn save_app_settings(app: AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
     if settings.display_name.trim().is_empty() { return Err("Display name is required.".to_owned()); }
     if settings.target_language != "vi" { return Err("Only Vietnamese is supported in this release.".to_owned()); }
-    if !matches!(settings.provider.as_str(), "openai-compatible" | "anthropic-compatible") { return Err("Unsupported translation provider.".to_owned()); }
+    translation_connection(&settings)?;
     let mut stored = settings;
     stored.library_root = match stored.library_root {
         Some(path) => Some(canonical_directory(Path::new(&path))?.to_string_lossy().into_owned()),
@@ -503,11 +592,10 @@ fn remove_book(book_id: String, app: AppHandle, state: State<DesktopState>) -> R
 async fn enrich_book_metadata(book_id: String, force: Option<bool>, app: AppHandle, state: State<'_, DesktopState>) -> Result<serde_json::Value, String> {
     let workspace = state.book_workspaces.lock().map_err(|_| "Unable to access library state.".to_owned())?.get(&book_id).cloned().ok_or_else(|| "Book workspace is unavailable. Rescan the library.".to_owned())?;
     let settings = read_settings(&app)?;
+    translation_connection(&settings)?;
     let api_key = credential_entry()?.get_password().map_err(|_| "Add your AI API key in BookGraph settings to fill book details.".to_owned())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let provider = if settings.provider.trim().is_empty() { DEFAULT_TRANSLATION_PROVIDER } else { settings.provider.as_str() };
-        let base = if settings.provider_base_url.trim().is_empty() { DEFAULT_TRANSLATION_BASE_URL } else { settings.provider_base_url.trim() };
-        let model = if settings.model.trim().is_empty() { DEFAULT_TRANSLATION_MODEL } else { settings.model.trim() };
+        let (provider, base, model) = translation_connection(&settings)?;
         let mut command = bookgraph_command();
         command.arg("book-metadata").arg(workspace).arg("--ai")
             .env("BOOKGRAPH_TRANSLATION_API_KEY", api_key)
@@ -521,10 +609,8 @@ async fn enrich_book_metadata(book_id: String, force: Option<bool>, app: AppHand
     }).await.map_err(|error| format!("Book details could not finish: {error}"))?
 }
 
-fn reader_command(workspace: &Path, settings: &AppSettings, api_key: &str, port: u16) -> Command {
-    let provider = if settings.provider.trim().is_empty() { DEFAULT_TRANSLATION_PROVIDER } else { settings.provider.as_str() };
-    let base = if settings.provider_base_url.trim().is_empty() { DEFAULT_TRANSLATION_BASE_URL } else { settings.provider_base_url.trim() };
-    let model = if settings.model.trim().is_empty() { DEFAULT_TRANSLATION_MODEL } else { settings.model.trim() };
+fn reader_command(workspace: &Path, settings: &AppSettings, api_key: &str, port: u16) -> Result<Command, String> {
+    let (provider, base, model) = translation_connection(settings)?;
     let mut command = bookgraph_command();
     command.arg("serve-http")
         .arg(workspace).arg("--host").arg("127.0.0.1").arg("--port").arg(port.to_string())
@@ -534,7 +620,7 @@ fn reader_command(workspace: &Path, settings: &AppSettings, api_key: &str, port:
         .env("BOOKGRAPH_TRANSLATION_PROVIDER", provider)
         .env("BOOKGRAPH_TRANSLATION_BASE_URL", base)
         .env("BOOKGRAPH_TRANSLATION_MODEL", model);
-    command
+    Ok(command)
 }
 
 fn stop_reader(child: &mut Child) {
@@ -570,7 +656,7 @@ fn start_reader_server(workspace: &Path, state: &DesktopState, settings: &AppSet
     let address = listener.local_addr().map_err(|error| error.to_string())?;
     drop(listener);
     let base_url = format!("http://{address}");
-    let mut child = reader_command(workspace, settings, &api_key, address.port())
+    let mut child = reader_command(workspace, settings, &api_key, address.port())?
         .spawn().map_err(|error| format!("Unable to start the local BookGraph reader service: {error}"))?;
     for _ in 0..300 {
         if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
@@ -648,7 +734,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(DesktopState::default())
-        .invoke_handler(tauri::generate_handler![get_reader_api_base_url, get_app_settings, save_app_settings, get_credential_status, save_translation_api_key, delete_translation_api_key, select_profile_image, select_book_pdf, select_library_root, prepare_mineru_book, get_mineru_workspace_info, open_mineru_web, open_local_folder, organize_mineru_results, create_library_folder, scan_library, remove_book, enrich_book_metadata, open_book, back_to_library])
+        .invoke_handler(tauri::generate_handler![get_reader_api_base_url, get_app_settings, save_app_settings, get_credential_status, list_provider_models, save_translation_api_key, delete_translation_api_key, select_profile_image, select_book_pdf, select_library_root, prepare_mineru_book, get_mineru_workspace_info, open_mineru_web, open_local_folder, organize_mineru_results, create_library_folder, scan_library, remove_book, enrich_book_metadata, open_book, back_to_library])
         .build(tauri::generate_context!())
         .expect("error while building BookGraph desktop application")
         .run(|app, event| {
@@ -663,12 +749,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn official_connections_override_stale_gateway_addresses() {
+        let mut settings = AppSettings::default();
+        settings.model = "selected-model".to_owned();
+        settings.provider_base_url = "https://old-gateway.invalid".to_owned();
+        assert_eq!(translation_connection(&settings).unwrap(), ("openai", "https://api.openai.com/v1", "selected-model"));
+        settings.provider = "anthropic".to_owned();
+        assert_eq!(translation_connection(&settings).unwrap(), ("anthropic", "https://api.anthropic.com", "selected-model"));
+    }
+
+    #[test]
+    fn old_gateway_credentials_keep_their_previous_connection() {
+        let mut settings = AppSettings::default();
+        settings.provider = "anthropic-compatible".to_owned();
+        let settings = preserve_legacy_connection(settings);
+        assert_eq!(settings.provider_base_url, DEFAULT_TRANSLATION_BASE_URL);
+        assert_eq!(settings.model, DEFAULT_TRANSLATION_MODEL);
+        assert!(can_reuse_model_key(&settings, "anthropic-compatible", DEFAULT_TRANSLATION_BASE_URL));
+        assert!(!can_reuse_model_key(&settings, "anthropic", ""));
+        assert!(!can_reuse_model_key(&settings, "anthropic-compatible", "https://other.invalid"));
+        let mut custom = AppSettings::default();
+        custom.provider = "openai-compatible".to_owned();
+        custom.model = "model".to_owned();
+        assert!(translation_connection(&custom).is_err());
+    }
+
+    #[test]
     fn reader_passes_credentials_and_selected_provider_to_its_owned_port() {
         let mut settings = AppSettings::default();
         settings.provider = "anthropic-compatible".to_owned();
         settings.provider_base_url = "https://example.invalid/v1".to_owned();
         settings.model = "test-model".to_owned();
-        let command = reader_command(Path::new("/tmp/test-book"), &settings, "test-canary-not-a-real-key", 54321);
+        let command = reader_command(Path::new("/tmp/test-book"), &settings, "test-canary-not-a-real-key", 54321).unwrap();
         let env: HashMap<_, _> = command.get_envs().filter_map(|(key, value)| value.map(|value| (key.to_string_lossy().into_owned(), value.to_string_lossy().into_owned()))).collect();
         assert_eq!(env.get("BOOKGRAPH_TRANSLATION_API_KEY").map(String::as_str), Some("test-canary-not-a-real-key"));
         assert_eq!(env.get("BOOKGRAPH_TRANSLATION_PROVIDER").map(String::as_str), Some("anthropic-compatible"));
@@ -677,6 +789,28 @@ mod tests {
         let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
         assert!(args.windows(2).any(|pair| pair == ["--port", "54321"]));
         assert!(!args.iter().any(|arg| arg.contains("canary")));
+    }
+
+    #[test]
+    fn gemini_is_an_official_google_connection() {
+        let mut settings = AppSettings::default();
+        settings.provider = "gemini".to_owned();
+        settings.model = "gemini-text-model".to_owned();
+        settings.provider_base_url = "http://localhost:8045".to_owned();
+        assert_eq!(translation_connection(&settings).unwrap(), ("gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-text-model"));
+        assert!(!can_reuse_model_key(&settings, "openai-compatible", "http://localhost:8045"));
+    }
+
+    #[test]
+    fn removed_proxy_preset_migrates_to_a_custom_gateway_not_google() {
+        let mut settings = AppSettings::default();
+        settings.provider = "antigravity".to_owned();
+        settings.provider_base_url = "http://localhost:8045/gateway".to_owned();
+        settings.model = "existing-model".to_owned();
+        let saved = preserve_legacy_connection(settings);
+        assert_eq!(saved.provider, "openai-compatible");
+        assert_eq!(saved.provider_base_url, "http://localhost:8045/gateway/v1");
+        assert_eq!(saved.model, "existing-model");
     }
 
     #[test]

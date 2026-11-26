@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
+import time
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -715,6 +718,9 @@ class AnthropicCompatibleTranslationProvider:
 def configured_provider(config: TranslationProviderConfig) -> TranslationProvider:
     """Build the configured provider without exposing its credential to callers."""
 
+    from bookgraph.provider_connection import resolve_connection
+
+    config = resolve_connection(config)
     api_key = os.environ.get("BOOKGRAPH_TRANSLATION_API_KEY", "").strip()
     if not api_key:
         raise ReadingServiceError("Set BOOKGRAPH_TRANSLATION_API_KEY on the BookGraph server.")
@@ -723,7 +729,7 @@ def configured_provider(config: TranslationProviderConfig) -> TranslationProvide
     if config.provider == "anthropic-compatible":
         return AnthropicCompatibleTranslationProvider(config, api_key)
     raise ReadingServiceError(
-        "translation.provider must be 'openai-compatible' or 'anthropic-compatible'"
+        "Choose an official provider or an OpenAI/Anthropic-compatible gateway."
     )
 
 
@@ -739,15 +745,98 @@ def _reject_truncated(data: object) -> None:
         raise ReadingServiceError("AI response was truncated by the provider's output limit.")
 
 
-def _request_json(request: Request, timeout_seconds: int) -> dict[str, Any]:
+def _http_error_info(error: HTTPError) -> dict[str, Any]:
+    """Inspect only for classification; never expose raw provider error bodies."""
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
-            return json.loads(response.read().decode("utf-8"))
-    except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
-        # Do not propagate provider responses: they can contain credentials, request data,
-        # or provider-specific internals and are later exposed through the browser API.
-        _LOGGER.warning("Translation provider request failed: %s", type(exc).__name__)
-        raise ReadingServiceError("Translation provider request failed.") from exc
+        payload = json.loads(error.read(32768))
+        if isinstance(payload, list) and payload:
+            payload = payload[0]
+        if isinstance(payload, dict):
+            info = payload.get("error")
+            if isinstance(info, dict):
+                return info
+    except (OSError, ValueError, TypeError):
+        pass
+    finally:
+        error.close()
+    return {}
+
+
+def _http_error_message(status: int, info: dict[str, Any]) -> str:
+    if status == 401:
+        message = "AI API rejected the API key"
+    elif status == 403:
+        message = "AI API denied access; check key permissions and model availability"
+    elif status in {404, 410}:
+        message = "The selected AI model or API endpoint is unavailable for this account"
+    elif status == 429:
+        code = info.get("code")
+        if code == "credit_balance_exhausted":
+            message = "AI API credits are exhausted"
+        elif re.search(r"\blimit:\s*0\b", str(info.get("message", "")), re.IGNORECASE):
+            message = "The selected model has no API quota for this project"
+        else:
+            message = "AI API rate limit or quota was exceeded; check the selected model's quota"
+    elif status == 503:
+        message = "AI service is temporarily overloaded or unavailable; try again later"
+    elif status in {408, 500, 502, 504}:
+        message = "AI service returned a temporary server error; try again later"
+    elif status in {400, 422}:
+        message = "AI API rejected the request parameters or selected model"
+    else:
+        message = "AI API request failed"
+    return f"{message} (HTTP {status})."
+
+
+def _http_retry_delay(retry_after: str | None, attempt: int) -> float | None:
+    delay = float(2 ** (attempt - 1))
+    if retry_after:
+        try:
+            delay = float(retry_after)
+        except ValueError:
+            try:
+                delay = parsedate_to_datetime(retry_after).timestamp() - time.time()
+            except (ValueError, TypeError, OverflowError, OSError):
+                pass
+    # Do not ignore a server's request to wait longer than this interactive retry budget.
+    if not math.isfinite(delay) or delay > 8:
+        return None
+    return max(0.0, delay)
+
+
+def _request_json(request: Request, timeout_seconds: int) -> dict[str, Any]:
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
+                payload = json.loads(response.read().decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            return payload
+        except HTTPError as exc:
+            status = exc.code
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            message = _http_error_message(status, _http_error_info(exc))
+            delay = _http_retry_delay(retry_after, attempt)
+            if status in {408, 500, 502, 503, 504} and attempt < attempts and delay is not None:
+                _LOGGER.warning(
+                    "AI API HTTP %d; retrying attempt %d/%d after %.1fs",
+                    status, attempt + 1, attempts, delay,
+                )
+                time.sleep(delay)
+                continue
+            if status in {408, 500, 502, 503, 504} and attempt == attempts:
+                message += f" Automatic HTTP retries exhausted ({attempts} attempts)."
+            raise ReadingServiceError(message) from None
+        except TimeoutError:
+            raise ReadingServiceError("AI API request timed out. Please try again later.") from None
+        except (URLError, OSError):
+            raise ReadingServiceError(
+                "Cannot connect to the AI API. Check the network and API Base URL."
+            ) from None
+        except (ValueError, TypeError):
+            raise ReadingServiceError("AI API returned an invalid JSON response.") from None
+    raise AssertionError("HTTP attempts must be positive")  # pragma: no cover
 
 
 def _strip_markdown_fence(content: str) -> str:

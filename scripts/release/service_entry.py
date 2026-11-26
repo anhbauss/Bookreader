@@ -9,6 +9,10 @@ import certifi
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+    if len(sys.argv) == 2 and sys.argv[1] == "--desktop-list-models":
+        from bookgraph.model_catalog import main
+
+        raise SystemExit(main())
     if len(sys.argv) == 3 and sys.argv[1] == "--desktop-self-check":
         from pathlib import Path
 

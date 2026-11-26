@@ -124,12 +124,14 @@ def load_config(workspace: WorkspacePaths) -> BookGraphConfig:
             daily_sections=_positive_int_at(payload, ["reading_plan", "daily_sections"], 1)
         ),
         translation=TranslationConfig(
-            provider=_optional_string_at(payload, ["translation", "provider"])
-            or _optional_environment("BOOKGRAPH_TRANSLATION_PROVIDER"),
-            base_url=_optional_url_at(payload, ["translation", "base_url"])
-            or _optional_environment("BOOKGRAPH_TRANSLATION_BASE_URL"),
-            model=_optional_string_at(payload, ["translation", "model"])
-            or _optional_environment("BOOKGRAPH_TRANSLATION_MODEL"),
+            # The desktop passes its selected connection to the owned service.
+            # A book's older provider must not redirect the newly selected key.
+            provider=_optional_environment("BOOKGRAPH_TRANSLATION_PROVIDER")
+            or _optional_string_at(payload, ["translation", "provider"]),
+            base_url=_optional_environment("BOOKGRAPH_TRANSLATION_BASE_URL")
+            or _optional_url_at(payload, ["translation", "base_url"]),
+            model=_optional_environment("BOOKGRAPH_TRANSLATION_MODEL")
+            or _optional_string_at(payload, ["translation", "model"]),
             timeout_seconds=_positive_int_at(payload, ["translation", "timeout_seconds"], 120),
         ),
     )

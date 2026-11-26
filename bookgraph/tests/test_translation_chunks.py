@@ -1,3 +1,5 @@
+import re
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -191,3 +193,97 @@ def test_many_protected_formulas_have_unambiguous_markers(tmp_path: Path) -> Non
         WorkspacePaths(tmp_path), section(source), "vi", Provider(), CONFIG
     )
     assert body == source.replace("English", "Vietnamese")
+
+
+def test_missing_middle_marker_is_not_misreported_as_reordering(tmp_path: Path) -> None:
+    class MissingMarkerProvider(Provider):
+        def translate_section(self, source: str, *, target_language: str) -> str:
+            self.calls.append(source)
+            markers = re.findall(r"BOOKGRAPH_KEEP_[a-f0-9]+_[0-9]+_TOKEN", source)
+            return source.replace(markers[1], "")
+
+    provider = MissingMarkerProvider()
+    with pytest.raises(ReadingServiceError, match="lost or changed protected") as failure:
+        translate_in_chunks(
+            WorkspacePaths(tmp_path), section("English $a$ then $b$ then $c$."),
+            "vi", provider, CONFIG,
+        )
+    assert "reordered" not in str(failure.value)
+    assert "3 attempts" in str(failure.value)
+    assert len(provider.calls) == 3
+    assert not list(tmp_path.rglob("part-*.json"))
+
+
+@pytest.mark.parametrize("kind", ["missing", "duplicate", "reordered", "incomplete", "structure"])
+def test_invalid_part_is_retried_without_retranslating_valid_parts(
+    tmp_path: Path, kind: str,
+) -> None:
+    class FlakyProvider(Provider):
+        def translate_section(self, source: str, *, target_language: str) -> str:
+            self.calls.append(source)
+            if "English part 2:" in source and self.calls.count(source) < 3:
+                # The first two valid parts are already durable; invalid output isn't saved.
+                assert len(list(tmp_path.rglob("part-*.json"))) == 2
+                markers = re.findall(r"BOOKGRAPH_KEEP_[a-f0-9]+_[0-9]+_TOKEN", source)
+                if kind == "missing":
+                    return source.replace(markers[1], "")
+                if kind == "duplicate":
+                    return source.replace(markers[1], markers[1] * 2)
+                if kind == "reordered":
+                    return source.replace(markers[0], "SWAP").replace(
+                        markers[1], markers[0]
+                    ).replace("SWAP", markers[1])
+                if kind == "incomplete":
+                    return re.sub(r"BOOKGRAPH_KEEP_[a-f0-9]+_END", "", source)
+                # An invented Markdown link is rejected by structural verification.
+                return source.replace("English", "[Vietnamese](https://invented.invalid)")
+            return source.replace("English", "Vietnamese")
+
+    source = "\n\n".join(
+        f"English part {i}: $x_{{{i}}}$ then $y_{{{i}}}$. " + "word " * 16
+        for i in range(4)
+    )
+    assert len(split_translation_chunks(source, max_chars=160)) == 4
+    provider = FlakyProvider()
+    workspace = WorkspacePaths(tmp_path)
+    body, _ = translate_in_chunks(
+        workspace, section(source), "vi", provider, CONFIG, max_chars=160,
+    )
+    assert body == source.replace("English", "Vietnamese")
+    assert sorted(Counter(provider.calls).values()) == [1, 1, 1, 3]
+    assert len(list(tmp_path.rglob("part-*.json"))) == 4
+    cached = Provider()
+    assert translate_in_chunks(
+        workspace, section(source), "vi", cached, CONFIG, max_chars=160,
+    )[0] == body
+    assert cached.calls == []
+
+
+def test_exhausted_validation_retries_keep_prior_parts_for_manual_resume(tmp_path: Path) -> None:
+    class InvalidProvider(Provider):
+        def translate_section(self, source: str, *, target_language: str) -> str:
+            self.calls.append(source)
+            if "second" in source:
+                return "Incomplete response"
+            return source.replace("English", "Vietnamese")
+
+    source = "English first. " * 5 + "\n\n" + "English second. " * 5
+    workspace = WorkspacePaths(tmp_path)
+    invalid = InvalidProvider()
+    with pytest.raises(ReadingServiceError, match="part 2/2.*3 attempts"):
+        translate_in_chunks(workspace, section(source), "vi", invalid, CONFIG, max_chars=90)
+    assert len(invalid.calls) == 4
+    assert len(list(tmp_path.rglob("part-*.json"))) == 1
+    resumed = Provider()
+    body, _ = translate_in_chunks(
+        workspace, section(source), "vi", resumed, CONFIG, max_chars=90,
+    )
+    assert body == source.replace("English", "Vietnamese")
+    assert len(resumed.calls) == 1
+
+
+def test_provider_request_errors_are_not_automatically_retried(tmp_path: Path) -> None:
+    provider = Provider(fail_at=1)
+    with pytest.raises(ReadingServiceError, match="provider request failed"):
+        translate_in_chunks(WorkspacePaths(tmp_path), section("English."), "vi", provider, CONFIG)
+    assert len(provider.calls) == 1
