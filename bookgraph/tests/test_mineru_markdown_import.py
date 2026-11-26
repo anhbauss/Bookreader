@@ -86,6 +86,24 @@ def test_markdown_source_preserves_tables_math_images_and_json_provenance(tmp_pa
     assert report["staged_images"] == 2
 
 
+def test_mineru_build_preserves_utf8(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    batch = workspace / "mineru/normalized/batch-001"
+    text = "Nội dung tiếng Việt ờ"
+    result = batch / "result.json"
+    payload = json.loads(result.read_text(encoding="utf-8"))
+    payload["pdf_info"][0]["para_blocks"][1]["content"] = text
+    result.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    (batch / "result.md").write_text(f"# Chapter\n\n{text}\n", encoding="utf-8")
+
+    assert build_reading_workspace(workspace) == ("book", 2)
+    manifest = workspace / "sources/sections/book/sections.jsonl"
+    assert text in read_sections(manifest)[0].text
+    assert text in (workspace / "sources/parsed/book/book_middle.json").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_rebuild_preserves_ids_and_backs_up_previous_sections(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     build_reading_workspace(workspace)

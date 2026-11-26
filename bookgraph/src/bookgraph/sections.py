@@ -38,12 +38,14 @@ def write_sections(sections: list[Section], output_dir: Path) -> SectionsOutput:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest = output_dir / "sections.jsonl"
-    manifest.write_text("".join(section.model_dump_json() + "\n" for section in sections))
+    manifest.write_text(
+        "".join(section.model_dump_json() + "\n" for section in sections), encoding="utf-8"
+    )
 
     markdown: list[Path] = []
     for section in sections:
         path = output_dir / f"{section.id}.md"
-        path.write_text(render_section_markdown(section))
+        path.write_text(render_section_markdown(section), encoding="utf-8")
         markdown.append(path)
 
     return SectionsOutput(manifest=manifest, markdown=markdown)
@@ -58,7 +60,7 @@ def read_sections(manifest: Path) -> list[Section]:
     """
 
     sections: list[Section] = []
-    for line in manifest.read_text().splitlines():
+    for line in manifest.read_text(encoding="utf-8").splitlines():
         if line.strip():
             sections.append(Section.model_validate_json(line))
     return sections
@@ -72,7 +74,7 @@ def count_sections(manifest: Path) -> int:
     parsing and validating every section's text/metadata.
     """
 
-    return sum(1 for line in manifest.read_text().splitlines() if line.strip())
+    return sum(1 for line in manifest.read_text(encoding="utf-8").splitlines() if line.strip())
 
 
 def render_section_markdown(section: Section) -> str:

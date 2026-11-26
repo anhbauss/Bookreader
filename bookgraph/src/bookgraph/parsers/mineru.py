@@ -65,7 +65,7 @@ class MinerUMiddleJsonParser(DocumentParser):
 
 def _load_json(source: Path, parser_name: str) -> Any:
     try:
-        return json.loads(source.read_text())
+        return json.loads(source.read_bytes())
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise UnsupportedSourceError(
             f"{source.name}: {parser_name} needs valid JSON: {exc}"

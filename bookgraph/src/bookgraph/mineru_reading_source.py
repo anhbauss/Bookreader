@@ -247,7 +247,9 @@ def prepare_reading_source(
     missing: set[str] = set()
     source = (
         "\n\n".join(
-            _rewrite_images(files[0].read_text(), batch.batch_id, images, missing).rstrip("\n")
+            _rewrite_images(
+                files[0].read_text(encoding="utf-8-sig"), batch.batch_id, images, missing
+            ).rstrip("\n")
             for batch, files in zip(batches, markdown, strict=True)
         )
         + "\n"
@@ -295,7 +297,7 @@ def prepare_reading_source(
     sections = _sections_from_source(sections, document, source, source_path)
     original_count = len(sections)
     sections = group_reading_sections(sections)
-    (staged_dir / "source.md").write_text(source)
+    (staged_dir / "source.md").write_text(source, encoding="utf-8")
     return (
         document,
         sections,

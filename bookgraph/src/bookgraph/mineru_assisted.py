@@ -75,7 +75,7 @@ def prepare_mineru_workspace(
     workspace.root.mkdir()
     for directory in workspace.directories():
         directory.mkdir(parents=True, exist_ok=True)
-    workspace.config.write_text(default_config(workspace))
+    workspace.config.write_text(default_config(workspace), encoding="utf-8")
 
     copied_source = workspace.sources_inbox / f"{doc_id}.pdf"
     shutil.copy2(source, copied_source)
@@ -123,7 +123,8 @@ def prepare_mineru_workspace(
             },
             indent=2,
         )
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     return MinerUPreparation(
         doc_id,
@@ -148,7 +149,7 @@ def organize_mineru_downloads(workspace_root: Path) -> list[str]:
     workspace = WorkspacePaths(_directory(workspace_root, "workspace"))
     manifest_path = workspace.root / "mineru" / "manifest.json"
     try:
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_bytes())
     except (OSError, json.JSONDecodeError) as exc:
         raise MinerUAssistedError("MinerU manifest is missing or invalid") from exc
     if not isinstance(manifest, dict) or not isinstance(manifest.get("batches"), list):
@@ -187,7 +188,9 @@ def organize_mineru_downloads(workspace_root: Path) -> list[str]:
             copied.append(source.name)
         report_batches.append({"batch_id": batch_id, "files": sorted(copied)})
     report = {"version": 1, "batches": report_batches, "status": "organized"}
-    (normalized / "import-report.json").write_text(json.dumps(report, indent=2) + "\n")
+    (normalized / "import-report.json").write_text(
+        json.dumps(report, indent=2) + "\n", encoding="utf-8"
+    )
     return sorted(expected)
 
 
@@ -201,8 +204,8 @@ def build_reading_workspace(workspace_root: Path) -> tuple[str, int]:
     workspace = WorkspacePaths(_directory(workspace_root, "workspace"))
     manifest_path = workspace.root / "mineru" / "manifest.json"
     try:
-        manifest = json.loads(manifest_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+        manifest = json.loads(manifest_path.read_bytes())
+    except (OSError, ValueError) as exc:
         raise MinerUAssistedError("MinerU manifest is missing or invalid") from exc
     if not isinstance(manifest, dict) or not isinstance(manifest.get("doc_id"), str):
         raise MinerUAssistedError("MinerU manifest is invalid")
@@ -231,8 +234,8 @@ def build_reading_workspace(workspace_root: Path) -> tuple[str, int]:
         if len(json_files) != 1:
             raise MinerUAssistedError(f"expected one JSON result for {batch_id}")
         try:
-            payload = json.loads(json_files[0].read_text())
-        except (OSError, json.JSONDecodeError) as exc:
+            payload = json.loads(json_files[0].read_bytes())
+        except (OSError, ValueError) as exc:
             raise MinerUAssistedError(f"invalid MinerU JSON for {batch_id}") from exc
         pages = payload.get("pdf_info") if isinstance(payload, dict) else None
         if not isinstance(pages, list):
@@ -265,7 +268,9 @@ def build_reading_workspace(workspace_root: Path) -> tuple[str, int]:
             staged_parsed.mkdir()
         middle_name = f"{doc_id}_middle.json"
         middle_json = staged_parsed / middle_name
-        middle_json.write_text(json.dumps({"pdf_info": combined_pages}, ensure_ascii=False) + "\n")
+        middle_json.write_text(
+            json.dumps({"pdf_info": combined_pages}, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
         try:
             document = MinerUMiddleJsonParser().parse(middle_json, staged_parsed)
             final_source = str(parsed_dir / middle_name)
@@ -308,7 +313,9 @@ def build_reading_workspace(workspace_root: Path) -> tuple[str, int]:
         "backup": str(backup) if backup else None,
         **details,
     }
-    (normalized / "build-report.json").write_text(json.dumps(report, indent=2) + "\n")
+    (normalized / "build-report.json").write_text(
+        json.dumps(report, indent=2) + "\n", encoding="utf-8"
+    )
     return doc_id, len(sections)
 
 
@@ -348,7 +355,7 @@ def regroup_reading_workspace(workspace_root: Path, split_depth: int = 2) -> tup
     if split_depth not in {2, 3}:
         raise MinerUAssistedError("split_depth must be 2 or 3")
     workspace = WorkspacePaths(_directory(workspace_root, "workspace"))
-    manifest = json.loads((workspace.root / "mineru/manifest.json").read_text())
+    manifest = json.loads((workspace.root / "mineru/manifest.json").read_bytes())
     doc_id = validate_slug_id(str(manifest.get("doc_id", "")), field_name="doc_id")
     directory = workspace.sources_sections / doc_id
     original = read_sections(directory / "sections.jsonl")
